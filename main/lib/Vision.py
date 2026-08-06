@@ -1,0 +1,176 @@
+"""
+TO DO
+- Create shared variables to store the config and stuff
+- Create the ball process
+- Make enemy/teammate/wall/goal shit + process
+"""
+
+from multiprocessing import Value, Array
+from lib.BaseVision import Camera, Broadcaster, BaseProcArgs
+from ctypes import c_bool, c_uint8, c_uint16, c_int16
+from typing import Any
+import cv2
+import numpy as np
+import struct
+import time
+
+class Vision:
+    def __init__(self):
+        self.camera = Camera()
+        self.broadcaster = Broadcaster(self.camera.create_broadcaster_args())
+
+        self.ball_proc_setup()
+        self.goal_proc_setup()
+    
+    def start(self):
+        self.camera.start()
+        self.broadcaster.start()
+
+    def deinit(self):
+        self.camera.stop()
+        self.broadcaster.deinit()
+
+    def wait_next_frame(self, timeout=3):
+        "Note: May sometimes trigger without waiting for the next frame"
+        with self.camera.c_new_frame:
+            self.camera.c_new_frame.wait(timeout=timeout)
+    
+    # Ball proc
+    def ball_proc_setup(self):
+        self.ball_bounds_v = Array(c_uint8, (0, 120, 80, 30, 255, 255))  # (lboundH, S, V, uboundH, S, V) - change defaults later!
+        self.ball_info_v = Array(c_int16, (0, 0, 0, 0, 0))  # angle, dist, x, y, r
+
+        self.broadcaster.register_proc(
+            "Ball",
+            self.ball_proc_init,
+            self.ball_proc_loop,
+            None,
+            (
+                self.ball_bounds_v,
+                self.ball_info_v,
+                self.camera.frame_shape
+            )
+        )
+    
+    @staticmethod
+    def ball_proc_init(ball_bounds_v, ball_info_v, frame_shape):
+        mask_frame = np.zeros(shape=frame_shape[:2], dtype=np.uint8)  # 2D array since only 1 channel
+        return (ball_bounds_v, ball_info_v, mask_frame)
+
+    @staticmethod
+    def ball_proc_loop(base_args: BaseProcArgs, keep_args: dict[str, Any]):
+        enabled = base_args.enabled
+        if not enabled:
+            return
+        
+        frame_size, frame_shape, latest_idx, latest_timestamp, frame = base_args[:5]
+        ball_bounds_v, ball_info_v, mask_frame = keep_args
+
+        # Find ball
+        pixel_pos = None
+        bounds = np.array(ball_bounds_v, dtype=np.uint8)
+        lbound = bounds[:3]
+        ubound = bounds[3:]
+
+        # rgb_frame = np.copy(frame)  # DEBUG
+        cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, frame)
+        cv2.inRange(frame, lbound, ubound, mask_frame)
+        # cv2.imwrite("/var/www/html/frame.jpg", np.hstack((cv2.cvtColor(mask_frame, cv2.COLOR_GRAY2BGR), rgb_frame, frame)))  # DEBUG
+        # time.sleep(0.1)  # DEBUG
+        ballContours = cv2.findContours(mask_frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+        if ballContours:
+            bestContour = max(ballContours, key=cv2.contourArea)
+            (y, x), r = cv2.minEnclosingCircle(bestContour)
+            y, x, r = int(y), int(x), int(r)
+            pixel_pos = (y, x)
+        
+        if not pixel_pos:
+            ball_info_v[:] = (0, 0, 0, 0, 0)
+            return
+        
+        center = np.array((frame_shape[0] // 2, frame_shape[1] // 2), dtype=np.int16)
+        translated_pixel_pos = pixel_pos - center
+        distance = min(32767, int(np.sqrt(sum(np.square(pixel_pos)))))
+        angle = int(np.arctan2(x, y) / np.pi * 32767)  # Might be other way around
+
+        ball_info_v[:] = angle, distance, y, x, r
+        return
+    
+    # Goal proc
+    def goal_proc_setup(self):
+        self.goal_bounds_v = Array(c_uint8, (140, 90, 35, 170, 255, 255, 35, 120, 50, 45, 255, 255, 3))  # 2 bgoal HSV bounds, ygoal HSV bounds, shared k_ε*255
+        self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0))  # Left angle, Right angle, Aim for zero, x, y
+        self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0))
+        self.enabled_goals_v = Value(c_uint8, 3)  # 2^0 bit: Blue goal enabled, 2^1 bit: Yellow goal enabled
+
+        self.broadcaster.register_proc(
+            "Goals",
+            self.goal_proc_init,
+            self.goal_proc_loop,
+            None,
+            (
+                self.goal_bounds_v,
+                self.bgoal_info_v,
+                self.ygoal_info_v,
+                self.enabled_goals_v,
+                self.camera.frame_shape
+            )
+        )
+
+    @staticmethod
+    def goal_proc_init(goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v, frame_shape):
+        # hsv_frame = np.zeros(shape=frame_shape, dtype=np.uint8)  # DEBUG
+        goal_mask_frame = np.zeros(shape=frame_shape[:2], dtype=np.uint8)
+        values = [goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v]
+
+        return [goal_mask_frame, values]  # Also add hsv_frame if using for debug
+    
+    @staticmethod
+    def goal_proc_loop(base_args: BaseProcArgs, keep_args: dict):
+        enabled = base_args.enabled
+        if not enabled:
+            return
+        
+        frame_size, frame_shape, latest_idx, latest_timestamp, frame = base_args[:5]
+        goal_mask_frame, values = keep_args  # also unpack hsv_frame from here if using
+        goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v = values
+        
+        enabled_goals = enabled_goals_v.value
+        # cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, hsv_frame)  # DEBUG (Replace line below)
+        cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, frame)
+        cfg = np.array(goal_bounds_v, dtype=np.uint8)
+
+        ke = cfg[12]
+        # Do once for blue goal, do once for yellow goal
+        for enabled_flag, lbound, ubound, goal_info_v in ((1, cfg[0:3], cfg[3:6], bgoal_info_v), (2, cfg[6:9], cfg[9:12], ygoal_info_v)):
+            if not enabled_goals & enabled_flag:  # Flag for enabling that color goal (1 blue, 2 yellow)
+                continue
+
+            cv2.inRange(frame, lbound, ubound, goal_mask_frame)  # Replace with hsv_frame if using
+            goalContours = cv2.findContours(goal_mask_frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+            if goalContours:
+                bestContour = max(goalContours, key=cv2.contourArea)
+                polygon = cv2.approxPolyDP(bestContour, ke * cv2.arcLength(bestContour, True), True)
+                goal_center_x, goal_center_y = np.mean(polygon[:, 0, :], axis=0).astype(np.int16)
+
+                img_center = np.array((frame_shape[0] // 2, frame_shape[1] // 2), dtype=np.int16)
+                point_angles = np.arctan2(polygon[:, 0, 0] - img_center[0], polygon[:, 0, 1] - img_center[1])  # Might be other way around
+
+                # Note: This particular chunk of logic is lowkirkuinely horrendous
+                #       And incomplete
+                min_angle = min(point_angles) % (2 * np.pi) - np.pi
+                max_angle = max(point_angles) % (2 * np.pi) - np.pi
+                min_angle = int(min_angle * 32767)  # Unit is 1/32767 of a revolution
+                max_angle = int(max_angle * 32767)
+                if max_angle - min_angle > np.pi:
+                    left = max_angle
+                    right = min_angle
+                else:
+                    left = min_angle
+                    right = max_angle
+                aimforzero = 0  # 0: forward is inside goal. # 1: turn left for that to happen. # 2: turn right
+
+                goal_info_v[:] = left, right, aimforzero, goal_center_x, goal_center_y
+            # time.sleep(0.5)  # DEBUG
+            # if enabled_flag == 1:  # DEBUG
+                # cv2.imwrite("/var/www/html/frame.jpg", np.hstack((cv2.cvtColor(goal_mask_frame, cv2.COLOR_GRAY2BGR), frame, hsv_frame)))  # DEBUG
