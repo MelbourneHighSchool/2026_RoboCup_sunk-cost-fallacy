@@ -1,0 +1,43 @@
+{
+    "motors": {
+        "ne": {
+            "address": 25,
+            "elec_angle_offset": 1447707648,
+            "sin_cos_centre": 1244,
+            "angle_off": 55
+        },
+        "se": {
+            "address": 27,
+            "elec_angle_offset": 1375902208,
+            "sin_cos_centre": 1272,
+            "angle_off": 135
+        },
+        "sw": {
+            "address": 28,
+            "elec_angle_offset": 1423452928,
+            "sin_cos_centre": 1252,
+            "angle_off": 225
+        },
+        "nw": {
+            "address": 29,
+            "elec_angle_offset": 1283652352,
+            "sin_cos_centre": 1254,
+            "angle_off": 305
+        },
+        "dribbler": {
+            "address": 31,
+            "elec_angle_offset": 1379574528,
+            "sin_cos_centre": 1250
+        }
+    },
+    "switches": {
+        "12": {
+            "pin": 12,
+            "on_high": true
+        },
+        "goal": {
+            "pin": 16,
+            "on_high": true
+        }
+    }
+}
