@@ -1,3 +1,9 @@
+"""
+TODO
+- FIX CATASTROPHIC CRASH WHEN DISCONNECTING FROM INTERFACE SIDE
+- Force async server, avoid lag during debug
+"""
+
 from websockets.sync.server import serve
 import websockets
 import json

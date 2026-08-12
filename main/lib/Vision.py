@@ -3,6 +3,7 @@ TO DO
 - Create shared variables to store the config and stuff
 - Create the ball process
 - Make enemy/teammate/wall/goal shit + process
+- Add a way to calibrate mirror centre...
 """
 
 from multiprocessing import Value, Array
@@ -80,20 +81,23 @@ class Vision:
         ballContours = cv2.findContours(mask_frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
         if ballContours:
             bestContour = max(ballContours, key=cv2.contourArea)
-            (y, x), r = cv2.minEnclosingCircle(bestContour)
-            y, x, r = int(y), int(x), int(r)
-            pixel_pos = (y, x)
+            (x, y), r = cv2.minEnclosingCircle(bestContour)
+            x, y, r = int(x), int(y), int(r)
+            pixel_pos = (x, y)
         
         if not pixel_pos:
             ball_info_v[:] = (0, 0, 0, 0, 0)
             return
+
+        # HI BAO WHY ARE Y AND X SWAPPED TS MAKES 0 SENSE 😭😭😭
         
         center = np.array((frame_shape[0] // 2, frame_shape[1] // 2), dtype=np.int16)
         translated_pixel_pos = pixel_pos - center
         distance = min(32767, int(np.sqrt(sum(np.square(pixel_pos)))))
-        angle = int(np.arctan2(x, y) / np.pi * 32767)  # Might be other way around
+        x, y = translated_pixel_pos
+        angle = int(np.arctan2(y, x) / np.pi * 32767)  # Might be other way around
 
-        ball_info_v[:] = angle, distance, y, x, r
+        ball_info_v[:] = angle, distance, x, y, r
         return
     
     # Goal proc
