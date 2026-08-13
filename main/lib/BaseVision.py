@@ -42,7 +42,7 @@ class ProcEntry(NamedTuple):
     v_enabled: Synchronized_T
 
 class Camera:
-    def __init__(self, size: tuple[int, int] = (432, 432), shm_name: str = "type shii"):
+    def __init__(self, size: tuple[int, int] = (640, 640), shm_name: str = "type shii"):
         # Store args and useful stuff
         self.size = size
         self.shm_name = shm_name

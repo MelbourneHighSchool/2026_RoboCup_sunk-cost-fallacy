@@ -15,6 +15,8 @@ import numpy as np
 import struct
 import time
 
+OFFSET_X = -20
+OFFSET_Y = 55
 class Vision:
     def __init__(self):
         self.camera = Camera()
@@ -22,6 +24,12 @@ class Vision:
 
         self.ball_proc_setup()
         self.goal_proc_setup()
+
+    @property
+    def ball_info(self):
+        angle, distance, x, y, r = self.ball_info_v[:]
+        angle =  -(angle * 180 / 32767 + 90) % 360
+        return (angle, distance, x, y, r)
     
     def start(self):
         self.camera.start()
@@ -38,7 +46,7 @@ class Vision:
     
     # Ball proc
     def ball_proc_setup(self):
-        self.ball_bounds_v = Array(c_uint8, (0, 120, 80, 30, 255, 255))  # (lboundH, S, V, uboundH, S, V) - change defaults later!
+        self.ball_bounds_v = Array(c_uint8, (0, 120, 200, 30, 255, 255))  # (lboundH, S, V, uboundH, S, V) - change defaults later!
         self.ball_info_v = Array(c_int16, (0, 0, 0, 0, 0))  # angle, dist, x, y, r
 
         self.broadcaster.register_proc(
@@ -91,18 +99,19 @@ class Vision:
 
         # HI BAO WHY ARE Y AND X SWAPPED TS MAKES 0 SENSE 😭😭😭
         
-        center = np.array((frame_shape[0] // 2, frame_shape[1] // 2), dtype=np.int16)
+        center = np.array((frame_shape[1] // 2 + OFFSET_X, frame_shape[0] // 2 + OFFSET_Y), dtype=np.int16)
+        img_x, img_y = pixel_pos
         translated_pixel_pos = pixel_pos - center
         distance = min(32767, int(np.sqrt(sum(np.square(pixel_pos)))))
         x, y = translated_pixel_pos
         angle = int(np.arctan2(y, x) / np.pi * 32767)  # Might be other way around
 
-        ball_info_v[:] = angle, distance, x, y, r
+        ball_info_v[:] = angle, distance, img_x, img_y, r
         return
     
     # Goal proc
     def goal_proc_setup(self):
-        self.goal_bounds_v = Array(c_uint8, (140, 90, 35, 170, 255, 255, 35, 120, 50, 45, 255, 255, 3))  # 2 bgoal HSV bounds, ygoal HSV bounds, shared k_ε*255
+        self.goal_bounds_v = Array(c_uint8, (140, 90, 105, 170, 255, 255, 35, 120, 50, 45, 255, 255, 3))  # 2 bgoal HSV bounds, ygoal HSV bounds, shared k_ε*255
         self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0))  # Left angle, Right angle, Aim for zero, x, y
         self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0))
         self.enabled_goals_v = Value(c_uint8, 3)  # 2^0 bit: Blue goal enabled, 2^1 bit: Yellow goal enabled
@@ -157,8 +166,8 @@ class Vision:
                 polygon = cv2.approxPolyDP(bestContour, ke * cv2.arcLength(bestContour, True), True)
                 goal_center_x, goal_center_y = np.mean(polygon[:, 0, :], axis=0).astype(np.int16)
 
-                img_center = np.array((frame_shape[0] // 2, frame_shape[1] // 2), dtype=np.int16)
-                point_angles = np.arctan2(polygon[:, 0, 0] - img_center[0], polygon[:, 0, 1] - img_center[1])  # Might be other way around
+                img_center = np.array((frame_shape[1] // 2 + OFFSET_X, frame_shape[0] // 2 + OFFSET_Y), dtype=np.int16)
+                point_angles = np.arctan2(polygon[:, 0, 1] - img_center[0], polygon[:, 0, 0] - img_center[1])  # Might be other way around
 
                 # Note: This particular chunk of logic is lowkirkuinely horrendous
                 #       And incomplete
