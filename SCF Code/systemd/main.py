@@ -101,9 +101,7 @@ class Robot():
 
         ## Ball capturing
         self.GIVE_UP_CHASING_BALL_TIME = 0.6 # seconds
-        self.BALL_ORBIT_RADIUS = 14
-        self.BALL_CHASE_SPD_MAX = 0.2
-        self.BALL_CHASE_SPD_MIN = 0.03
+        
 
 
     def on_update(self):
@@ -205,6 +203,11 @@ class Robot():
 
     
     def ball_capture(self):
+        MOVE_FORWARD_ANGLE = 30 # ±
+        ORBIT_RADIUS = 14
+        SPD_MAX = 0.2
+        SPD_MIN = 0.03
+
         if self.see_ball:
             ball_dir = self.ball_dir
             ball_dist = self.ball_dist
@@ -214,23 +217,25 @@ class Robot():
             ball_dist = self.last_ball_dist
 
         # https://www.desmos.com/calculator/lhvwffvnag
-        self.move_spd = self.sigmoid(ball_dist, self.BALL_CHASE_SPD_MIN, self.BALL_CHASE_SPD_MAX, 0.15, 30)
-        # self.move_spd = min(BALL_CHASE_SPD_MAX, max(BALL_CHASE_SPD_MIN, self.ball_dist / 200 + 0.01))
+        self.move_spd = self.sigmoid(ball_dist, SPD_MIN, SPD_MAX, 0.15, 30)
 
         # If ball is roughly forward, go towards it
-        if abs(ball_dir) < 40:
+        if abs(ball_dir) < MOVE_FORWARD_ANGLE:
             self.dribble()
             self.move_dir = ball_dir * 1.5
+
+            modified_radius = self.sigmoid(abs(ball_dir), 0, ORBIT_RADIUS, 0.5, MOVE_FORWARD_ANGLE / 2)
+            self.move_dir = ball_dir + np.copysign(math.degrees(np.asin(modified_radius / ball_dist)), ball_dir)
         else:
             self.stop_dribbler()
             # If too close to ball, go away from it
-            if ball_dist < self.BALL_ORBIT_RADIUS:
-                distance_ratio = (self.BALL_ORBIT_RADIUS - ball_dist) / self.BALL_ORBIT_RADIUS
+            if ball_dist < ORBIT_RADIUS:
+                distance_ratio = (ORBIT_RADIUS - ball_dist) / ORBIT_RADIUS
                 orbit_angle = 90 + distance_ratio * 90
                 self.move_dir = ball_dir + np.copysign(orbit_angle, ball_dir)
             # Else move in an angle that is tangent to a circle centered at the ball
             else:        
-                self.move_dir = ball_dir + np.copysign(math.degrees(np.asin(self.BALL_ORBIT_RADIUS / ball_dist)), ball_dir)
+                self.move_dir = ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS / ball_dist)), ball_dir)
 
     
     def is_ready_to_shoot(self):
@@ -333,5 +338,3 @@ if __name__ == "__main__":
     finally:
         bot.drive.stop()
         bot.stop_dribbler()
-
-    

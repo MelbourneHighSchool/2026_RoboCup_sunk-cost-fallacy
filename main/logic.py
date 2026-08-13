@@ -11,13 +11,11 @@ import cv2
 import numpy as np
 import math
 
+# -----------------------------------------------------------------------------------------------------------
 
-# Robot Class Definition
 class Robot:
-    """Robot class with ball_capture behavior"""
     
     def __init__(self, drive):
-        """Initialize Robot with required attributes"""
         self.drive = drive
         
         # Ball tracking
@@ -26,97 +24,115 @@ class Robot:
         self.ball_dist = None
         self.last_ball_dir = None
         self.last_ball_dist = None
-        self.last_ball_see_time = time.monotonic()
+        self.last_ball_see_time = 0
         
         # Movement
         self.move_spd = 0
         self.move_dir = 0
+
+        # Position & Orientation
+        self.bot_dir = 0
         
         # Constants
         self.GIVE_UP_CHASING_BALL_TIME = 0.6
+
     
-    def dribble(self):
-        """Enable dribbler (placeholder for now)"""
-        # print("Dribbler ON")
-        pass
-    
-    def stop_dribbler(self):
-        """Disable dribbler (placeholder for now)"""
-        # print("Dribbler OFF")
-        pass
-    
-    def sigmoid(self, value, min=0, max=1, steepness=1, centre=0):
-        """Sigmoid function for smooth speed scaling
-        https://www.desmos.com/calculator/pdsx583kvo
-        """
-        a = math.exp(steepness * (value - centre))
-        return (max - min) * (a / (1 + a)) + min
+    def update_movement(self):
+        self.ball_capture()
     
     def ball_capture(self):
-        # print(self.ball_dir)
         """Ball capture behavior - orbits ball and moves towards it"""
         MOVE_FORWARD_ANGLE = 20  # ±
-        ORBIT_RADIUS = 370
+        ORBIT_RADIUS = 370 # Pixels
         SPD_MAX = 0.2
         SPD_MIN = 0.03
 
-        if self.see_ball:
-            ball_dir = self.ball_dir
-            ball_dist = self.ball_dist
-        else:
-            # For when last_ball_see_time is less than GIVE_UP_CHASING_BALL_TIME seconds ago
-            ball_dir = self.last_ball_dir
-            ball_dist = self.last_ball_dist
-
-        # https://www.desmos.com/calculator/lhvwffvnag
-        self.move_spd = self.sigmoid(ball_dist, SPD_MIN, SPD_MAX, 0.002, 700)
-        # self.move_spd = 0.1
+        self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.002, 700)
 
         # If ball is roughly forward, go towards it
-        if abs(ball_dir) < MOVE_FORWARD_ANGLE:
-            print("FORWARD")
-            self.dribble()
-            self.move_dir = ball_dir * 1.5
-
-            modified_radius = self.sigmoid(abs(ball_dir), 0, ORBIT_RADIUS, 0.5, MOVE_FORWARD_ANGLE / 2)
-            self.move_dir = ball_dir + np.copysign(math.degrees(np.asin(modified_radius / ball_dist)), ball_dir)
-        else:
-            self.stop_dribbler()
-            
+        if abs(self.ball_dir) < MOVE_FORWARD_ANGLE:
+            self.move_dir = self.ball_dir * 1.5
+            modified_radius = self.sigmoid(abs(self.ball_dir), 0, ORBIT_RADIUS, 0.5, MOVE_FORWARD_ANGLE / 2)
+            self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(modified_radius / self.ball_dist)), self.ball_dir)
+        else:           
             # If too close to ball, go away from it
-            if ball_dist < ORBIT_RADIUS:
-                print("too close")
-                distance_ratio = (ORBIT_RADIUS - ball_dist) / ORBIT_RADIUS
+            if self.ball_dist < ORBIT_RADIUS:
+                distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
                 orbit_angle = 90 + distance_ratio * 90
-                self.move_dir = ball_dir + np.copysign(orbit_angle, ball_dir)
+                self.move_dir = self.ball_dir + np.copysign(orbit_angle, self.ball_dir)
             # Else move in an angle that is tangent to a circle centered at the ball
             else:  
-                print("Orbit")
-                self.move_dir = ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS / ball_dist)), ball_dir)
+                self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS / self.ball_dist)), self.ball_dir)
     
     def update_ball_info(self, ball_dir, ball_dist):
         """Update ball information and tracking"""
-        if ball_dir is not None and ball_dist is not None:
+        self.see_ball = ball_dist != 0 or ball_dir is not None or ball_dist is not None
+
+        if self.see_ball:
             self.last_ball_dir = self.ball_dir
             self.last_ball_dist = self.ball_dist
             self.last_ball_see_time = time.monotonic()
+
+        if self.see_ball:
+            self.ball_dir = ball_dir
+            self.ball_dist = ball_dist
+        elif time.monotonic() - self.last_ball_see_time < self.GIVE_UP_CHASING_BALL_TIME:
+            self.ball_dir = self.last_ball_dir
+            self.ball_dist = self.last_ball_dist
         
         self.ball_dir = self.wrap_angle(ball_dir)
         self.ball_dist = ball_dist
-        self.see_ball = self.ball_dist != 0 or self.ball_dir is not None or self.ball_dist is not None
-    
+
+    def update_goal_info(self):
+         pass        
+
+
+    # ----- Basic actions ----- #
     def move(self):
         """Execute movement based on move_dir and move_spd"""
         self.drive.move(angle=self.move_dir, speed=self.move_spd)
-        # print(f"Moving: dir={self.move_dir:.1f}°, spd={self.move_spd:.2f}")
-    
 
+    def kick(self):
+        # TODO: Actually kick
+        pass
+
+    def dribble(self):
+        # TODO: Actually dribble
+        pass
+    
+    def stop_dribbler(self):
+        # TODO
+        pass
+
+    # ----- Helper functions ----- #
     def wrap_angle(self, theta):
             """Returns same angle but in [-180°,180°)"""
             if theta is None:
                 return None
             return (theta + 180) % 360 - 180
 
+    def sigmoid(self, value, min=0, max=1, steepness=1, centre=0):
+            #https://www.desmos.com/calculator/pdsx583kvo
+            
+            a = math.exp(steepness * (value - centre))
+            return (max - min) * (a / (1 + a)) + min
+
+    def to_absolute_dir(self, relative_dir):
+            """Input a direction relative to the bot orientation\nReturns a direction that ignores bot orientation"""
+            if relative_dir is None:
+                return None
+            return relative_dir + self.bot_dir
+    
+    def to_relative_dir(self, absolute_dir):
+        """Input a direction that ignores bot orientation\nReturns a direction relative to the bot orientation"""
+        if absolute_dir is None:
+            return None
+        return absolute_dir - self.bot_dir
+
+    def clamp(self, value, min, max):
+            return max(min, min(value, max))
+
+# -----------------------------------------------------------------------------------------------------------
 
 # Main script
 server = WSServer()
@@ -158,16 +174,11 @@ while True:
             # Send frame
             server.send_frame(frame)
         
-        # Update robot with ball info
+        # Update robot stuff
         robot.update_ball_info(bangle, bdist)
-        
-        # Execute ball capture behavior
-        robot.ball_capture()
-        
-        # Move robot based on behavior
+        robot.update_movement()
         robot.move()
         
-        # print(bangle)
     except KeyboardInterrupt:
         break
 
