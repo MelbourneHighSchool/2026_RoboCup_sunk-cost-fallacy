@@ -1,44 +1,61 @@
-SEND_FRAME = True
-
 from lib.config import Config
 from lib.imu import IMU
 from lib.Vision import Vision
 from lib.drive import Drive
 from lib.interface import WSServer
+from lib.kicker import Kicker
 
 import time
 import cv2
 import numpy as np
 import math
+import board
+
+SEND_FRAME = True
+
+SOLENOID_PIN = board.D27
+PULSE_S = 0.02
 
 # -----------------------------------------------------------------------------------------------------------
 
 class Robot:
-    
-    def __init__(self, drive):
-        self.drive = drive
-        
+    def __init__(self, drive=None, imu=None, config=None):
+        self.config = config if config is not None else Config()
+        self.imu = imu if imu is not None else IMU()
+
+        if drive is not None:
+            self.drive = drive
+        else:
+            self.drive = Drive(self.imu, self.config)
+
+        self.kicker = None # TODO
+        self.kicker = Kicker(SOLENOID_PIN, PULSE_S)
+
         # Ball tracking
         self.see_ball = False
+        self.have_ball = False
         self.ball_dir = None
         self.ball_dist = None
         self.last_ball_dir = None
         self.last_ball_dist = None
         self.last_ball_see_time = 0
-        
+
         # Movement
         self.move_spd = 0
         self.move_dir = 0
 
         # Position & Orientation
         self.bot_dir = 0
-        
+        self.pos_x = 0
+        self.pos_y = -450
+
         # Constants
         self.GIVE_UP_CHASING_BALL_TIME = 0.6
 
     
-    def update_movement(self):
+    def main_loop(self):
         self.ball_capture()
+        self.move()
     
     def ball_capture(self):
         """Ball capture behavior - orbits ball and moves towards it"""
@@ -49,20 +66,16 @@ class Robot:
 
         self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.002, 700)
 
-        # If ball is roughly forward, go towards it
-        if abs(self.ball_dir) < MOVE_FORWARD_ANGLE:
-            self.move_dir = self.ball_dir * 1.5
-            modified_radius = self.sigmoid(abs(self.ball_dir), 0, ORBIT_RADIUS, 0.5, MOVE_FORWARD_ANGLE / 2)
+        if abs(self.ball_dir) < MOVE_FORWARD_ANGLE or self.ball_dist > ORBIT_RADIUS:
+            if abs(self.ball_dir) < MOVE_FORWARD_ANGLE:
+                 modified_radius = ORBIT_RADIUS
+            else:
+                modified_radius = self.sigmoid(abs(self.ball_dir), 0, ORBIT_RADIUS, 0.5, MOVE_FORWARD_ANGLE / 2)
             self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(modified_radius / self.ball_dist)), self.ball_dir)
         else:           
-            # If too close to ball, go away from it
-            if self.ball_dist < ORBIT_RADIUS:
-                distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
-                orbit_angle = 90 + distance_ratio * 90
-                self.move_dir = self.ball_dir + np.copysign(orbit_angle, self.ball_dir)
-            # Else move in an angle that is tangent to a circle centered at the ball
-            else:  
-                self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS / self.ball_dist)), self.ball_dir)
+            distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
+            orbit_angle = 90 + distance_ratio * 90
+            self.move_dir = self.ball_dir + np.copysign(orbit_angle, self.ball_dir)
     
     def update_ball_info(self, ball_dir, ball_dist):
         """Update ball information and tracking"""
@@ -87,14 +100,57 @@ class Robot:
          pass        
 
 
-    # ----- Basic actions ----- #
+    # ----- Actions ----- #
     def move(self):
         """Execute movement based on move_dir and move_spd"""
+        # self.avoid_out_of_bounds()
         self.drive.move(angle=self.move_dir, speed=self.move_spd)
 
+    def avoid_out_of_bounds(self):
+        """Adjust move direction and speed for the x and y components to avoid going out of bounds"""
+        BOUND_LINE_X = 635 + 10     # mm, ±
+        BOUND_LINE_Y = 940 + 10     # mm, ±
+        START_SLOWDOWN_X_DIST = 100
+        START_SLOWDOWN_Y_DIST = 100
+        AVOID_WALL_SPD = 0.1
+
+        if self.move_dir is None or self.move_spd is None:
+            return
+
+        x_dir = 1 if self.pos_x >= 0 else -1
+        y_dir = 1 if self.pos_y >= 0 else -1
+
+        move_dir_absolute = self.to_absolute_dir(self.move_dir)
+        move_vec_x = self.move_spd * math.sin(math.radians(move_dir_absolute))
+        move_vec_y = self.move_spd * math.cos(math.radians(move_dir_absolute))
+
+        if abs(self.pos_x) > BOUND_LINE_X:
+            move_vec_x = -AVOID_WALL_SPD * x_dir
+        if abs(self.pos_y) > BOUND_LINE_Y:
+            move_vec_y = -AVOID_WALL_SPD * y_dir
+
+        if abs(self.pos_x) > BOUND_LINE_X - START_SLOWDOWN_X_DIST and np.sign(move_vec_x) == x_dir:
+            distance_to_wall = BOUND_LINE_X - abs(self.pos_x)
+            scale = self.clamp(distance_to_wall / START_SLOWDOWN_X_DIST, 0.0, 1.0)
+            move_vec_x *= scale
+
+        if abs(self.pos_y) > BOUND_LINE_Y - START_SLOWDOWN_Y_DIST and np.sign(move_vec_y) == y_dir:
+            distance_to_wall = BOUND_LINE_Y - abs(self.pos_y)
+            scale = self.clamp(distance_to_wall / START_SLOWDOWN_Y_DIST, 0.0, 1.0)
+            move_vec_y *= scale
+
+        final_speed = math.hypot(move_vec_x, move_vec_y)
+        if final_speed == 0:
+            self.move_spd = 0
+            self.move_dir = 0
+            return
+
+        final_angle = math.degrees(math.atan2(move_vec_x, move_vec_y))
+        self.move_dir = self.to_relative_dir(self.wrap_angle(final_angle))
+        self.move_spd = final_speed
+
     def kick(self):
-        # TODO: Actually kick
-        pass
+        self.kicker.kick()
 
     def dribble(self):
         # TODO: Actually dribble
@@ -142,13 +198,10 @@ vision = Vision()
 vision.start()
 R = min(vision.camera.size) / 2
 
-imu = IMU()
-config = Config()
+# Create robot instance
+robot = Robot()
 
-drive = Drive(imu, config)
-
-# Create Robot instance
-robot = Robot(drive)
+drive = robot.drive
 
 # Font settings
 default_font = (cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 5, cv2.LINE_AA)
@@ -170,14 +223,14 @@ while True:
             frame = cv2.circle(frame, (int(bx+R), int(by+R)), br, (0, 50, 150), 8, cv2.LINE_AA)
             frame = cv2.putText(frame, f"Ball angle: {bangle}", (padx, pady), *default_font)
             frame = cv2.putText(frame, f"Ball distance: {bdist}", (padx, pady+line_spacing), *default_font)
-    
+
             # Send frame
             server.send_frame(frame)
         
         # Update robot stuff
         robot.update_ball_info(bangle, bdist)
-        robot.update_movement()
-        robot.move()
+        # robbot.update_goal_info
+        robot.main_loop()
         
     except KeyboardInterrupt:
         break
