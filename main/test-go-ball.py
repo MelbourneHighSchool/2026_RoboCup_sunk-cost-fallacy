@@ -43,7 +43,7 @@ while True:
             frame = vision.camera.latest_frame
     
             # Show ball
-            frame = cv2.circle(frame, (int(bx+R), int(by+R)), br, (0, 50, 150), 8, cv2.LINE_AA)
+            frame = cv2.circle(frame, (int(bx), int(by)), br, (0, 50, 150), 8, cv2.LINE_AA)
             frame = cv2.putText(frame, f"Ball angle: {bangle}", (padx, pady), *default_font)
             frame = cv2.putText(frame, f"Ball distance: {bdist}", (padx, pady+line_spacing), *default_font)
 
