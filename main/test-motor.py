@@ -3,7 +3,7 @@ from lib.config import Config
 from lib.imu import IMU
 
 config = Config()
-drive = Drive.from_config(config._config)
+drive = Drive.from_config(config)
 imu = IMU()
 
 yaw_zero = None

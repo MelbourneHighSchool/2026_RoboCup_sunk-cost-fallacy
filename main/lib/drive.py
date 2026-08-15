@@ -17,10 +17,11 @@ class Drive:
     @staticmethod
     def from_config(config) -> "Drive":
         "Returns a Drivebase from a json file containing information about the motors"
-        NE = config["motors"]["ne"]
-        SE = config["motors"]["se"]
-        SW = config["motors"]["sw"]
-        NW = config["motors"]["nw"]
+        cfg = config._config  # Load up the dictionary from config (a Config class)
+        NE = cfg["motors"]["ne"]
+        SE = cfg["motors"]["se"]
+        SW = cfg["motors"]["sw"]
+        NW = cfg["motors"]["nw"]
         
         motors = []
         for mdata in NE, SE, SW, NW:
