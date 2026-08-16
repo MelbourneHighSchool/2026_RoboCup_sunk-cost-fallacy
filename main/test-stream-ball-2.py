@@ -20,7 +20,7 @@ R = min(vision.camera.size) / 2
 imu = IMU()
 config = Config()
 
-drive = Drive(imu, config)
+drive = Drive.from_config(config)
 
 # Font settings
 default_font = (cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 5, cv2.LINE_AA)
