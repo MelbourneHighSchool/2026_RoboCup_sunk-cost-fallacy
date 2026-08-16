@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 import math
 import board
+from enum import Enum
 
 SEND_FRAME = True
 
@@ -17,6 +18,18 @@ SOLENOID_PIN = board.D27
 PULSE_S = 0.02
 
 # -----------------------------------------------------------------------------------------------------------
+class RobotRegions(Enum):
+    NONE = 0
+    GOAL_SIDE = 1
+    MIDDLE = 2
+    MIDDLE_SIDE = 3
+    OWN_GOAL = 4
+    OWN_GOAL_SIDE = 5
+
+class PossessionStates(Enum):
+    HEADING_TO_GOAL = 0
+    ALIGNING_WITH_GOAL = 1
+    BALL_HIDING = 2
 
 class Robot:
     def __init__(self, drive=None, imu=None, config=None):
@@ -28,7 +41,6 @@ class Robot:
         else:
             self.drive = Drive(self.imu, self.config)
 
-        self.kicker = None # TODO
         self.kicker = Kicker(SOLENOID_PIN, PULSE_S)
 
         # Ball tracking
@@ -50,15 +62,19 @@ class Robot:
         self.pos_y = -450
 
         # Constants
-        self.GIVE_UP_CHASING_BALL_TIME = 0.6
+        self.GIVE_UP_CHASING_BALL_TIME = 1.0
 
     
     def main_loop(self):
-        self.ball_capture()
+        self.update_stuff()
+        if self.see_ball:
+            if self.region == RobotRegions.OWN_GOAL_SIDE and abs(self.ball_dir) > 60:
+                pass
+            else:
+                self.ball_capture()
         self.move()
     
     def ball_capture(self):
-        """Ball capture behavior - orbits ball and moves towards it"""
         MOVE_FORWARD_ANGLE = 20  # ±
         ORBIT_RADIUS = 370 # Pixels
         SPD_MAX = 0.2
@@ -96,17 +112,33 @@ class Robot:
         self.ball_dir = self.wrap_angle(ball_dir)
         self.ball_dist = ball_dist
 
-    def update_goal_info(self):
+    def update_goal_info(self): # TODO
          pass        
 
+    def update_stuff(self):
+        # Region
+        if self.abs(self.pos_x) > 350:
+            if self.pos_y > 700:
+                self.region = RobotRegions.GOAL_SIDE
+            elif self.pos_y < -640:
+                self.region = RobotRegions.OWN_GOAL_SIDE
+            elif abs(self.pos_x):
+                self.region = RobotRegions.MIDDLE_SIDE
+        elif self.pos_y < -640:
+            self.region = RobotRegions.OWN_GOAL
+        elif self.pos_y < 1100:
+            self.region = RobotRegions.MIDDLE
+        else:
+            self.region = RobotRegions.NONE
+        
 
     # ----- Actions ----- #
     def move(self):
         """Execute movement based on move_dir and move_spd"""
-        # self.avoid_out_of_bounds()
+        # self._avoid_out_of_bounds()
         self.drive.move(angle=self.move_dir, speed=self.move_spd)
 
-    def avoid_out_of_bounds(self):
+    def _avoid_out_of_bounds(self):
         """Adjust move direction and speed for the x and y components to avoid going out of bounds"""
         BOUND_LINE_X = 635 + 10     # mm, ±
         BOUND_LINE_Y = 940 + 10     # mm, ±
@@ -168,10 +200,9 @@ class Robot:
             return (theta + 180) % 360 - 180
 
     def sigmoid(self, value, min=0, max=1, steepness=1, centre=0):
-            #https://www.desmos.com/calculator/pdsx583kvo
-            
-            a = math.exp(steepness * (value - centre))
-            return (max - min) * (a / (1 + a)) + min
+            # https://www.desmos.com/calculator/jkqwos4tzh
+            a = math.exp(steepness * (centre - value))
+            return (max - min) * (1 / (1 + a)) + min
 
     def to_absolute_dir(self, relative_dir):
             """Input a direction relative to the bot orientation\nReturns a direction that ignores bot orientation"""
