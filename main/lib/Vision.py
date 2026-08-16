@@ -4,11 +4,13 @@ TO DO
 - Create the ball process
 - Make enemy/teammate/wall/goal shit + process
 - Add a way to calibrate mirror centre...
+
+- Possibly add locks for shared variables (but not sure if necessary)
 """
 
 from multiprocessing import Value, Array
 from lib.BaseVision import Camera, Broadcaster, BaseProcArgs
-from ctypes import c_bool, c_uint8, c_uint16, c_int16
+from ctypes import c_bool, c_uint8, c_uint16, c_int16, c_float
 from typing import Any
 import cv2
 import numpy as np
@@ -28,8 +30,20 @@ class Vision:
     @property
     def ball_info(self):
         angle, distance, x, y, r = self.ball_info_v[:]
-        angle =  -(angle * 180 / 32767 + 90) % 360
+        angle = -(angle * 180 / 32767 + 90) % 360
         return (angle, distance, x, y, r)
+
+    @property
+    def ygoal_info(self):
+        ang, x, y, w, h, rang  = self.ygoal_info_v[:]
+        ang = -(ang * 180 / 32767 + 90) % 360
+        return (ang, x, y, w, h, rang)
+
+    @property
+    def bgoal_info(self):
+        ang, x, y, w, h, rang  = self.bgoal_info_v[:]
+        ang = -(ang * 180 / 32767 + 90) % 360
+        return (ang, x, y, w, h, rang)
     
     def start(self):
         self.camera.start()
@@ -112,8 +126,8 @@ class Vision:
     # Goal proc
     def goal_proc_setup(self):
         self.goal_bounds_v = Array(c_uint8, (140, 90, 105, 170, 255, 255, 35, 120, 50, 45, 255, 255, 3))  # 2 bgoal HSV bounds, ygoal HSV bounds, shared k_ε*255
-        self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0))  # Left angle, Right angle, Aim for zero, x, y
-        self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0))
+        self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0))  # centre_angle, x, y, w, h, rect_angle
+        self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0))
         self.enabled_goals_v = Value(c_uint8, 3)  # 2^0 bit: Blue goal enabled, 2^1 bit: Yellow goal enabled
 
         self.broadcaster.register_proc(
@@ -163,27 +177,22 @@ class Vision:
             goalContours = cv2.findContours(goal_mask_frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
             if goalContours:
                 bestContour = max(goalContours, key=cv2.contourArea)
-                polygon = cv2.approxPolyDP(bestContour, ke * cv2.arcLength(bestContour, True), True)
-                goal_center_x, goal_center_y = np.mean(polygon[:, 0, :], axis=0).astype(np.int16)
+                rect = cv2.minAreaRect(bestContour)
 
-                img_center = np.array((frame_shape[1] // 2 + OFFSET_X, frame_shape[0] // 2 + OFFSET_Y), dtype=np.int16)
-                point_angles = np.arctan2(polygon[:, 0, 1] - img_center[0], polygon[:, 0, 0] - img_center[1])  # Might be other way around
+                (goal_center_x, goal_center_y), (goal_width, goal_height), rect_angle = rect
 
-                # Note: This particular chunk of logic is lowkirkuinely horrendous
-                #       And incomplete
-                min_angle = min(point_angles) % (2 * np.pi) - np.pi
-                max_angle = max(point_angles) % (2 * np.pi) - np.pi
-                min_angle = int(min_angle * 32767)  # Unit is 1/32767 of a revolution
-                max_angle = int(max_angle * 32767)
-                if max_angle - min_angle > np.pi:
-                    left = max_angle
-                    right = min_angle
-                else:
-                    left = min_angle
-                    right = max_angle
-                aimforzero = 0  # 0: forward is inside goal. # 1: turn left for that to happen. # 2: turn right
+                # polygon = cv2.approxPolyDP(bestContour, ke * cv2.arcLength(bestContour, True), True)
+                # goal_center_x, goal_center_y = np.mean(polygon[:, 0, :], axis=0).astype(np.int16)
 
-                goal_info_v[:] = left, right, aimforzero, goal_center_x, goal_center_y
+                # img_center = np.array((frame_shape[1] // 2 + OFFSET_X, frame_shape[0] // 2 + OFFSET_Y), dtype=np.int16)
+                angle = int(np.arctan2(goal_center_y, goal_center_x) / np.pi * 32767)
+                goal_center_x = int(goal_center_x)
+                goal_center_y = int(goal_center_y)
+                goal_width = int(goal_width)
+                goal_height = int(goal_height)
+                rect_angle = int(rect_angle)
+
+                goal_info_v[:] = angle, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle
             # time.sleep(0.5)  # DEBUG
             # if enabled_flag == 1:  # DEBUG
                 # cv2.imwrite("/var/www/html/frame.jpg", np.hstack((cv2.cvtColor(goal_mask_frame, cv2.COLOR_GRAY2BGR), frame, hsv_frame)))  # DEBUG
