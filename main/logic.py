@@ -35,11 +35,12 @@ class Robot:
     def __init__(self, drive=None, imu=None, config=None):
         self.config = config if config is not None else Config()
         self.imu = imu if imu is not None else IMU()
+        self.imu.calibrate_yaw()
 
         if drive is not None:
             self.drive = drive
         else:
-            self.drive = Drive(self.imu, self.config)
+            self.drive = Drive.from_config(self.config)
 
         self.kicker = Kicker(SOLENOID_PIN, PULSE_S)
 
@@ -55,11 +56,14 @@ class Robot:
         # Movement
         self.move_spd = 0
         self.move_dir = 0
+        self.rot_spd = 0
 
         # Position & Orientation
         self.bot_dir = 0
         self.pos_x = 0
         self.pos_y = -450
+        self._yaw_error = 0
+        self._yaw_error_time = time.monotonic()
 
         # Constants
         self.GIVE_UP_CHASING_BALL_TIME = 1.0
@@ -67,12 +71,10 @@ class Robot:
     
     def main_loop(self):
         self.update_stuff()
-        if self.see_ball:
-            if self.region == RobotRegions.OWN_GOAL_SIDE and abs(self.ball_dir) > 60:
-                pass
-            else:
-                self.ball_capture()
+        # self.yaw_correct()
+        # self.ball_capture()
         self.move()
+
     
     def ball_capture(self):
         MOVE_FORWARD_ANGLE = 20  # ±
@@ -116,8 +118,10 @@ class Robot:
          pass        
 
     def update_stuff(self):
+        self.bot_dir = self.imu.get_yaw()
+
         # Region
-        if self.abs(self.pos_x) > 350:
+        if abs(self.pos_x) > 350:
             if self.pos_y > 700:
                 self.region = RobotRegions.GOAL_SIDE
             elif self.pos_y < -640:
@@ -134,9 +138,9 @@ class Robot:
 
     # ----- Actions ----- #
     def move(self):
-        """Execute movement based on move_dir and move_spd"""
+        
         # self._avoid_out_of_bounds()
-        self.drive.move(angle=self.move_dir, speed=self.move_spd)
+        self.drive.move(0, 0, self.rot_spd)
 
     def _avoid_out_of_bounds(self):
         """Adjust move direction and speed for the x and y components to avoid going out of bounds"""
@@ -192,6 +196,30 @@ class Robot:
         # TODO
         pass
 
+    def yaw_correct(self, target_angle=0, speed=0.01, kp=0.01, kd=0.001):
+        """PD Yaw correction"""
+        print(self.bot_dir)
+        if abs(self.bot_dir < 1):
+            return
+        
+        current_yaw = self.imu.get_yaw()
+        if current_yaw is None:
+            self.rot_spd = 0
+            self.drive.move(self.move_dir, self.move_spd, self.rot_spd)
+            return self.rot_spd
+
+        self.bot_dir = self.wrap_angle(current_yaw)
+        error = self.wrap_angle(target_angle - self.bot_dir)
+
+        now = time.monotonic()
+        dt = now - self._yaw_error_time
+        derivative = (error - self._yaw_error) / dt if dt > 0 else 0
+
+        correction = kp * error + kd * derivative
+        self.rot_spd = self.clamp(correction, -abs(speed), abs(speed))
+        self._yaw_error = error
+        self._yaw_error_time = now
+    
     # ----- Helper functions ----- #
     def wrap_angle(self, theta):
             """Returns same angle but in [-180°,180°)"""
@@ -216,8 +244,8 @@ class Robot:
             return None
         return absolute_dir - self.bot_dir
 
-    def clamp(self, value, min, max):
-            return max(min, min(value, max))
+    def clamp(self, value, mn, mx):
+            return max(mn, min(value, mx))
 
 # -----------------------------------------------------------------------------------------------------------
 
