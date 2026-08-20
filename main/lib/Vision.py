@@ -44,6 +44,14 @@ class Vision:
         ang, x, y, w, h, rang  = self.bgoal_info_v[:]
         ang = -(ang * 180 / 32767 + 90) % 360
         return (ang, x, y, w, h, rang)
+
+    def load_config(self, config):
+        hsv = config.get_value("hsv")
+        if hsv is None:
+            return False
+
+        self.ball_bounds_v[:] = hsv["ball"]["low"] + hsv["ball"]["high"]
+        self.goal_bounds_v[:] = hsv["bgoal"]["low"] + hsv["bgoal"]["high"] + hsv["ygoal"]["low"] + hsv["ygoal"]["high"]
     
     def start(self):
         self.camera.start()
@@ -125,7 +133,8 @@ class Vision:
     
     # Goal proc
     def goal_proc_setup(self):
-        self.goal_bounds_v = Array(c_uint8, (140, 90, 105, 170, 255, 255, 35, 120, 50, 45, 255, 255, 3))  # 2 bgoal HSV bounds, ygoal HSV bounds, shared k_ε*255
+        self.goal_bounds_v = Array(c_uint8, (140, 90, 105, 170, 255, 255, 35, 120, 50, 45, 255, 255))  # 2 bgoal HSV bounds, ygoal HSV bounds
+        # I just removed ke (constant of 3 at the end of the array), hopefully nothing breaks
         self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0))  # centre_angle, x, y, w, h, rect_angle
         self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0))
         self.enabled_goals_v = Value(c_uint8, 3)  # 2^0 bit: Blue goal enabled, 2^1 bit: Yellow goal enabled
@@ -167,7 +176,6 @@ class Vision:
         cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, frame)
         cfg = np.array(goal_bounds_v, dtype=np.uint8)
 
-        ke = cfg[12]
         # Do once for blue goal, do once for yellow goal
         for enabled_flag, lbound, ubound, goal_info_v in ((1, cfg[0:3], cfg[3:6], bgoal_info_v), (2, cfg[6:9], cfg[9:12], ygoal_info_v)):
             if not enabled_goals & enabled_flag:  # Flag for enabling that color goal (1 blue, 2 yellow)

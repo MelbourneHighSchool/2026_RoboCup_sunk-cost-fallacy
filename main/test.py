@@ -96,11 +96,14 @@ if res is False:
     exit(0)
 
 # Load and run things
-config = Config("config.json")
+config = Config()
 
 match mode:
     case 0:
-        ...
+        match res:
+            case 1:
+                from _test_files import test_cam
+                test_cam.main(config)
     case 1:
         ...
     case 2:
