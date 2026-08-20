@@ -26,6 +26,9 @@ class IMU:
         self._thread = threading.Thread(target=self._update_loop, daemon=True)
         self._thread.start()
 
+        self.yaw_offset = 0
+        self.calibrate_yaw()
+
     def _update_loop(self):
         while self._running:
             try:
@@ -47,13 +50,18 @@ class IMU:
         cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
         return math.degrees(math.atan2(siny_cosp, cosy_cosp))
 
-    def get_latest_quaternion(self):
+    # we don't use quaternions
+    # def get_latest_quaternion(self):
+    #     with self._lock:
+    #         return self._latest_quaternion
+
+    def calibrate_yaw(self):
         with self._lock:
-            return self._latest_quaternion
+            self.yaw_offset = self._latest_yaw
 
     def get_yaw(self):
         with self._lock:
-            return self._latest_yaw
+            return self._latest_yaw - self.yaw_offset
 
     def get_acceleration(self):
         with self._lock:
