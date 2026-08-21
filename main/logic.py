@@ -71,27 +71,24 @@ class Robot:
     
     def main_loop(self):
         self.update_stuff()
-        # self.yaw_correct()
+        self.yaw_correct()
         # self.ball_capture()
         self.move()
-
+        
+        # print(self.ball_dir, self.ball_dist)
+        print(self.bot_dir)
     
     def ball_capture(self):
-        MOVE_FORWARD_ANGLE = 20  # ±
-        ORBIT_RADIUS = 370 # Pixels
-        SPD_MAX = 0.2
+        MOVE_FORWARD_ANGLE = 40  # ±
+        ORBIT_RADIUS = 150 # Pixels
+        TOO_CLOSE_RADIUS = 80
+        SPD_MAX = 0.3
         SPD_MIN = 0.03
 
         self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.002, 700)
 
-        if abs(self.ball_dir) < MOVE_FORWARD_ANGLE or self.ball_dist > ORBIT_RADIUS:
-            if abs(self.ball_dir) < MOVE_FORWARD_ANGLE:
-                 modified_radius = ORBIT_RADIUS
-            else:
-                modified_radius = self.sigmoid(abs(self.ball_dir), 0, ORBIT_RADIUS, 0.5, MOVE_FORWARD_ANGLE / 2)
-            self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(modified_radius / self.ball_dist)), self.ball_dir)
-        else:           
-            distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
+        if self.ball_dir < TOO_CLOSE_RADIUS and abs(self.ball_dir) > 70:
+            distance_ratio = (TOO_CLOSE_RADIUS - self.ball_dist) / TOO_CLOSE_RADIUS
             orbit_angle = 90 + distance_ratio * 90
             self.move_dir = self.ball_dir + np.copysign(orbit_angle, self.ball_dir)
     
@@ -196,7 +193,7 @@ class Robot:
         # TODO
         pass
 
-    def yaw_correct(self, target_angle=0, speed=0.01, kp=0.01, kd=0.001):
+    def yaw_correct(self, target_angle=0, speed=0.3, kp=0.002, kd=0.003):
         """PD Yaw correction"""
         print(self.bot_dir)
         if abs(self.bot_dir < 1):
@@ -279,7 +276,7 @@ while True:
             frame = vision.camera.latest_frame
     
             # Show ball
-            frame = cv2.circle(frame, (int(bx+R), int(by+R)), br, (0, 50, 150), 8, cv2.LINE_AA)
+            frame = cv2.circle(frame, (int(bx), int(by)), br, (0, 50, 150), 8, cv2.LINE_AA)
             frame = cv2.putText(frame, f"Ball angle: {bangle}", (padx, pady), *default_font)
             frame = cv2.putText(frame, f"Ball distance: {bdist}", (padx, pady+line_spacing), *default_font)
 
