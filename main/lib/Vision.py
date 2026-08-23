@@ -124,7 +124,7 @@ class Vision:
         center = np.array((frame_shape[1] // 2 + OFFSET_X, frame_shape[0] // 2 + OFFSET_Y), dtype=np.int16)
         img_x, img_y = pixel_pos
         translated_pixel_pos = pixel_pos - center
-        distance = min(32767, int(np.sqrt(sum(np.square(pixel_pos)))))
+        distance = min(32767, int(np.sqrt(sum(np.square(translated_pixel_pos)))))
         x, y = translated_pixel_pos
         angle = int(np.arctan2(y, x) / np.pi * 32767)  # Might be other way around
 
