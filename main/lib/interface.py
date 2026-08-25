@@ -4,8 +4,8 @@ TODO
 - Force async server, avoid lag during debug
 """
 
-from websockets.sync.server import serve
-import websockets
+from websocket.sync.server import serve
+import websocket
 import json
 import threading
 import cv2

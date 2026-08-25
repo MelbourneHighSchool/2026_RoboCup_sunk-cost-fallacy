@@ -35,15 +35,15 @@ class Vision:
 
     @property
     def ygoal_info(self):
-        ang, x, y, w, h, rang  = self.ygoal_info_v[:]
+        ang, distance, x, y, w, h, rang  = self.ygoal_info_v[:]
         ang = -(ang * 180 / 32767 + 90) % 360
-        return (ang, x, y, w, h, rang)
+        return (ang, distance, w, h, rang)
 
     @property
     def bgoal_info(self):
-        ang, x, y, w, h, rang  = self.bgoal_info_v[:]
+        ang, distance, x, y, w, h, rang  = self.bgoal_info_v[:]
         ang = -(ang * 180 / 32767 + 90) % 360
-        return (ang, x, y, w, h, rang)
+        return (ang, distance, w, h, rang)
 
     def load_config(self, config):
         hsv = config.get_value("hsv")
@@ -68,7 +68,7 @@ class Vision:
     
     # Ball proc
     def ball_proc_setup(self):
-        self.ball_bounds_v = Array(c_uint8, (0, 120, 200, 30, 255, 255))  # (lboundH, S, V, uboundH, S, V) - change defaults later!
+        self.ball_bounds_v = Array(c_uint8, (0, 120, 160, 30, 255, 255))  # (lboundH, S, V, uboundH, S, V) - change defaults later!
         self.ball_info_v = Array(c_int16, (0, 0, 0, 0, 0))  # angle, dist, x, y, r
 
         self.broadcaster.register_proc(
@@ -133,10 +133,10 @@ class Vision:
     
     # Goal proc
     def goal_proc_setup(self):
-        self.goal_bounds_v = Array(c_uint8, (140, 90, 105, 170, 255, 255, 35, 120, 50, 45, 255, 255))  # 2 bgoal HSV bounds, ygoal HSV bounds
+        self.goal_bounds_v = Array(c_uint8, (140, 200, 80, 180, 255, 150, 35, 120, 50, 45, 255, 255))  # 2 bgoal HSV bounds, ygoal HSV bounds
         # I just removed ke (constant of 3 at the end of the array), hopefully nothing breaks
-        self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0))  # centre_angle, x, y, w, h, rect_angle
-        self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0))
+        self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0))  # angle, distance, x, y, w, h, rect_angle
+        self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0))
         self.enabled_goals_v = Value(c_uint8, 3)  # 2^0 bit: Blue goal enabled, 2^1 bit: Yellow goal enabled
 
         self.broadcaster.register_proc(
@@ -179,28 +179,36 @@ class Vision:
         # Do once for blue goal, do once for yellow goal
         for enabled_flag, lbound, ubound, goal_info_v in ((1, cfg[0:3], cfg[3:6], bgoal_info_v), (2, cfg[6:9], cfg[9:12], ygoal_info_v)):
             if not enabled_goals & enabled_flag:  # Flag for enabling that color goal (1 blue, 2 yellow)
+                goal_info_v[:] = (0, 0, 0, 0, 0, 0, 0)
                 continue
 
             cv2.inRange(frame, lbound, ubound, goal_mask_frame)  # Replace with hsv_frame if using
             goalContours = cv2.findContours(goal_mask_frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
-            if goalContours:
-                bestContour = max(goalContours, key=cv2.contourArea)
-                rect = cv2.minAreaRect(bestContour)
+            if not goalContours:
+                goal_info_v[:] = (0, 0, 0, 0, 0, 0, 0)
+                continue
 
-                (goal_center_x, goal_center_y), (goal_width, goal_height), rect_angle = rect
+            bestContour = max(goalContours, key=cv2.contourArea)
+            rect = cv2.minAreaRect(bestContour)
 
-                # polygon = cv2.approxPolyDP(bestContour, ke * cv2.arcLength(bestContour, True), True)
-                # goal_center_x, goal_center_y = np.mean(polygon[:, 0, :], axis=0).astype(np.int16)
+            (goal_center_x, goal_center_y), (goal_width, goal_height), rect_angle = rect
 
-                # img_center = np.array((frame_shape[1] // 2 + OFFSET_X, frame_shape[0] // 2 + OFFSET_Y), dtype=np.int16)
-                angle = int(np.arctan2(goal_center_y, goal_center_x) / np.pi * 32767)
-                goal_center_x = int(goal_center_x)
-                goal_center_y = int(goal_center_y)
-                goal_width = int(goal_width)
-                goal_height = int(goal_height)
-                rect_angle = int(rect_angle)
+            # polygon = cv2.approxPolyDP(bestContour, ke * cv2.arcLength(bestContour, True), True)
+            # goal_center_x, goal_center_y = np.mean(polygon[:, 0, :], axis=0).astype(np.int16)
 
-                goal_info_v[:] = angle, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle
+            center_x = frame_shape[1] // 2 + OFFSET_X
+            center_y = frame_shape[0] // 2 + OFFSET_Y
+            relative_x = goal_center_x - center_x
+            relative_y = goal_center_y - center_y
+            distance = min(32767, int(np.hypot(relative_x, relative_y)))
+            angle = int(np.arctan2(relative_y, relative_x) / np.pi * 32767)
+            goal_center_x = int(goal_center_x)
+            goal_center_y = int(goal_center_y)
+            goal_width = int(goal_width)
+            goal_height = int(goal_height)
+            rect_angle = int(rect_angle)
+
+            goal_info_v[:] = angle, distance, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle
             # time.sleep(0.5)  # DEBUG
             # if enabled_flag == 1:  # DEBUG
                 # cv2.imwrite("/var/www/html/frame.jpg", np.hstack((cv2.cvtColor(goal_mask_frame, cv2.COLOR_GRAY2BGR), frame, hsv_frame)))  # DEBUG
