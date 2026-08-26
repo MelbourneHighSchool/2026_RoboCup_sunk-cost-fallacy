@@ -61,6 +61,7 @@ class Robot:
         self.move_spd = 0
         self.move_dir = 0
         self.rot_spd = 0
+        self.yaw_target = 0
         self.enable_yaw_correct = True
 
         # Position & Orientation
@@ -73,35 +74,96 @@ class Robot:
     
     def main_loop(self):
         self.update_stuff()
-        if self.enable_yaw_correct:
-            self.yaw_correct()
+        # self.defence_loop()
         self.attack_loop()
         # self.move()
+
+
+        # DEBUG
         # print(self.goal_dir, self.goal_dist)
+        # print(self.own_goal_dir, self.own_goal_dist)
+        # print(self.ball_dir, self.ball_dist, self.have_ball)
     
     def attack_loop(self):
+        if self.enable_yaw_correct:
+                    if self.see_goal:
+                        angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.3
+                        self.yaw_correct(self.to_absolute_dir(angle))
         if self.have_ball:
-            if self.see_goal:
-                self.move_dir = self.goal_dir
+            self.kick()
+            pass
         elif self.see_ball:
+            
             self.ball_capture()
         else:
             self.move_spd = 0
             self.move_dir = 0
             self.stop_dribbler()
 
+    def defence_loop(self):
+        KEEP_DIST = 50
+        TOLERANCE = 5
+        GOAL_WEIGHT = 0.1
+        BALL_WEIGHT = 1.0
+        if not self.see_own_goal:
+            self.rot_spd = 0
+            self.move_spd = 0
+            self.yaw_target = self.bot_dir
+            return
+  
+        if KEEP_DIST - TOLERANCE < self.own_goal_dist < KEEP_DIST + TOLERANCE:
+            move_dir_goal = 0
+        elif self.own_goal_dist > KEEP_DIST + TOLERANCE:
+            move_dir_goal = self.own_goal_dir
+        else:
+            move_dir_goal = self.own_goal_dir + 180
+            
+        if self.see_ball:
+            abs_goal_dir = self.to_absolute_dir(self.own_goal_dir)
+            abs_ball_dir = self.to_absolute_dir(self.ball_dir)
+            diff = self.wrap_angle(abs_goal_dir - abs_ball_dir)
+            move_dir_ball = self.to_absolute_dir(np.sign(diff) * 90)
+
+            # Face the circular midpoint between the ball and the direction
+            # opposite the goal, keeping the two objects on opposite sides.
+            target_x = math.sin(math.radians(abs_ball_dir)) - math.sin(math.radians(abs_goal_dir))
+            target_y = math.cos(math.radians(abs_ball_dir)) - math.cos(math.radians(abs_goal_dir))
+            angle_target = math.degrees(math.atan2(target_x, target_y))
+            self.yaw_correct(self.wrap_angle(angle_target), tolerance=12)
+        else:
+            self.yaw_correct(self.to_absolute_dir(self.own_goal_dir) + 180, tolerance=12)
+            if move_dir_goal == 0:
+                self.move_spd = 0
+            else:
+                self.move_spd = 0.03
+                self.move_dir = move_dir_goal
+            return
+
+        goal_angle = math.radians(self.to_absolute_dir(move_dir_goal))
+        ball_angle = math.radians(move_dir_ball)
+        move_vec_x = GOAL_WEIGHT * math.sin(goal_angle) + BALL_WEIGHT * math.sin(ball_angle)
+        move_vec_y = GOAL_WEIGHT * math.cos(goal_angle) + BALL_WEIGHT * math.cos(ball_angle)
+
+        self.move_spd = min(0.2, math.hypot(move_vec_x, move_vec_y))
+        if self.move_spd == 0:
+            self.move_dir = 0
+            return
+
+        move_angle = math.degrees(math.atan2(move_vec_x, move_vec_y))
+        self.move_dir = self.to_relative_dir(self.wrap_angle(move_angle))
+
     def ball_capture(self):
         MOVE_FORWARD_ANGLE = 45  # ±
-        ORBIT_RADIUS = 60
-        SPD_MAX = 0.2
-        SPD_MIN = 0.1
+        ORBIT_RADIUS = 70
+        SPD_MAX = 0.3
+        SPD_MIN = 0.05
 
-        self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.05, 100)
+        self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.05, 80)
 
         if abs(self.ball_dir) < 10:
             self.move_dir = self.ball_dir
         elif abs(self.ball_dir) < MOVE_FORWARD_ANGLE:
-            self.move_dir = self.ball_dir * 2.2
+            self.move_dir = self.ball_dir * 2.5
         elif self.ball_dist <= ORBIT_RADIUS:
             distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
             orbit_angle = 90 + distance_ratio * 90
@@ -128,6 +190,9 @@ class Robot:
             self.ball_dir = None
             self.ball_dist = None
 
+        self.have_ball = self.see_ball and self.ball_dist < 52
+
+
     def update_goal_info(
             self,
             bgoal_angle,
@@ -147,12 +212,11 @@ class Robot:
             else:
                 target_angle, target_dist = ygoal_angle, ygoal_dist
                 own_angle, own_dist = bgoal_angle, bgoal_dist
-
-            self.goal_dir = target_angle if target_dist != 0 else None
-            self.goal_dist = self.approx_real_dist(target_dist) if target_dist != 0 else None
+            self.goal_dir = self.wrap_angle(target_angle) if target_dist != 0 else None
+            self.goal_dist = self.approx_real_dist(target_dist) / 10 if target_dist != 0 else None
             self.see_goal = self.goal_dir is not None and self.goal_dist is not None
-            self.own_goal_dir = own_angle if own_dist != 0 else None
-            self.own_goal_dist = self.approx_real_dist(own_dist) if own_dist != 0 else None
+            self.own_goal_dir = self.wrap_angle(own_angle) if own_dist != 0 else None
+            self.own_goal_dist = self.approx_real_dist(own_dist) / 10 if own_dist != 0 else None
             self.see_own_goal = self.own_goal_dir is not None and self.own_goal_dist is not None
         
     def update_stuff(self):
@@ -231,15 +295,16 @@ class Robot:
     def stop_dribbler(self):
         self.dribbler.set_speed(0)
 
-    def yaw_correct(self, target_angle=0.0, max_spd=0.3, speed=1.0, kp=0.001, kd=0.00001):
+    def yaw_correct(self, target_angle=0.0, max_spd=0.3, speed=1.0, kp=0.001, kd=0.00001, tolerance=2):
         """PD Yaw correction"""
+        self.yaw_target = self.wrap_angle(target_angle)
         if self.bot_dir is None:
             self.rot_spd = 0
             return
 
         error = self.wrap_angle(target_angle - self.bot_dir)
 
-        if abs(error) < 2:
+        if abs(error) < tolerance:
             self.rot_spd = 0
             self._yaw_error = error
             self._yaw_error_time = time.monotonic()
@@ -254,11 +319,12 @@ class Robot:
         self._yaw_error = error
         self._yaw_error_time = now
 
-    def rotate_about_dribbler(self, speed):
+    def rotate_about_dribbler(self, dir, speed=0.05):
+        RATIO_CONSTANT = 1 # 1 happened to work
         self.enable_yaw_correct = False
-        self.rot_spd = speed
-        self.move_dir = -1 * np.sign(speed) * 90
-        self.move_spd = 6 * speed
+        self.rot_spd = speed * dir
+        self.move_dir = -1 * np.sign(dir) * 90
+        self.move_spd = RATIO_CONSTANT * speed
 
     # ----- Helper functions ----- #
 
@@ -300,7 +366,7 @@ class Robot:
         if pixel_dist is None or pixel_dist == 0.0:
             return None
         approx_real_dist_cm = 10**((pixel_dist + 75)/165)
-        return approx_real_dist_cm * 10
+        return approx_real_dist_cm * 10 + 105
 
     def lerp(self, value, input_min, input_max, output_min, output_max):
         return self.clamp(output_min + (value - input_min) * (output_max - output_min) / (input_max - input_min), output_min, output_max)
@@ -331,7 +397,7 @@ while True:
         bangle, bdist, bx, by, br = vision.ball_info
         bgoal_angle, bgoal_dist, bgoal_width, bgoal_height, bgoal_rect_angle = vision.bgoal_info
         ygoal_angle, ygoal_dist, ygoal_width, ygoal_height, ygoal_rect_angle = vision.ygoal_info
-        print(bgoal_angle)
+        # print(bgoal_angle)
         if SEND_FRAME:
             vision.wait_next_frame()
             frame = vision.camera.latest_frame
