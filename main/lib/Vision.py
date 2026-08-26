@@ -58,9 +58,11 @@ class Vision:
 
     @property
     def ygoal_info(self):
-        ang, distance, x, y, w, h, rang  = self.ygoal_info_v[:]
+        ang, eang1, eang2, distance, x, y, w, h, rang  = self.ygoal_info_v[:]
         ang = -(ang * 180 / 32767 + 90) % 360
-        return (ang, distance, w, h, rang)
+        eang1 = -(eang1 * 180 / 32767 + 90) % 360
+        eang2 = -(eang2 * 180 / 32767 + 90) % 360
+        return (ang, eang1, eang2, distance, w, h, rang)
 
     @property
     def bgoal_info(self):
