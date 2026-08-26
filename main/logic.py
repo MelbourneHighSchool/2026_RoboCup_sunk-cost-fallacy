@@ -50,7 +50,6 @@ class Robot:
         self.GIVE_UP_CHASING_BALL_TIME = 0.5
 
         # Goal
-        self.TARGET_GOAL_IS_BLUE = False
         self.see_goal = False
         self.goal_dir = None
         self.goal_dist = None
@@ -78,21 +77,23 @@ class Robot:
     
     def main_loop(self):
         self.update_stuff()
-        # self.defence_loop()
-        self.attack_loop()
-        # self.move()
 
+        self.attack_loop()
+        # self.defence_loop()
+
+        self.move()
 
         # DEBUG
+        # print(self.ball_dir, self.ball_dist, self.have_ball)
         # print(self.goal_dir, self.goal_dist)
         # print(self.own_goal_dir, self.own_goal_dist)
-        # print(self.ball_dir, self.ball_dist, self.have_ball)
+        
     
     def attack_loop(self):
         if self.enable_yaw_correct:
-                    if self.see_goal:
-                        angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.3
-                        self.yaw_correct(self.to_absolute_dir(angle))
+            if self.see_goal:
+                angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.3
+                self.yaw_correct(self.to_absolute_dir(angle))
         if self.have_ball:
             self.kick()
             pass
@@ -175,7 +176,6 @@ class Robot:
         else:
             self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS/self.ball_dist)), self.ball_dir)
 
-    
     def update_ball_info(self, ball_dir, ball_dist):
         self.see_ball = ball_dist != 0.0
 
@@ -195,7 +195,6 @@ class Robot:
             self.ball_dist = None
 
         self.have_ball = self.see_ball and self.ball_dist < 52
-
 
     def update_goal_info(
             self,
@@ -248,7 +247,6 @@ class Robot:
         self.drive.move(self.move_dir, self.move_spd, self.rot_spd)
 
     def avoid_out_of_bounds(self):
-        """Adjust move direction and speed for the x and y components to avoid going out of bounds"""
         BOUND_LINE_X = 635 + 10     # mm, ±
         BOUND_LINE_Y = 940 + 10     # mm, ±
         START_SLOWDOWN_X_DIST = 100
@@ -324,6 +322,7 @@ class Robot:
         self._yaw_error_time = now
 
     def rotate_about_dribbler(self, dir, speed=0.05):
+        """Input: dir = 1 for clockwise, 1 for anticlockwise"""
         RATIO_CONSTANT = 1 # 1 happened to work
         self.enable_yaw_correct = False
         self.rot_spd = speed * dir
@@ -349,13 +348,13 @@ class Robot:
             """Input a direction relative to the bot orientation\nReturns a direction that ignores bot orientation"""
             if relative_dir is None:
                 return None
-            return relative_dir + self.bot_dir
+            return self.wrap_angle(relative_dir + self.bot_dir)
     
     def to_relative_dir(self, absolute_dir):
         """Input a direction that ignores bot orientation\nReturns a direction relative to the bot orientation"""
         if absolute_dir is None:
             return None
-        return absolute_dir - self.bot_dir
+        return self.wrap_angle(absolute_dir - self.bot_dir)
 
     @staticmethod
     def clamp(value, mn, mx):
@@ -370,7 +369,7 @@ class Robot:
         if pixel_dist is None or pixel_dist == 0.0:
             return None
         approx_real_dist_cm = 10**((pixel_dist + 75)/165)
-        return approx_real_dist_cm * 10 + 105
+        return approx_real_dist_cm * 10 + 105 # 210/2 = 105
 
     def lerp(self, value, input_min, input_max, output_min, output_max):
         return self.clamp(output_min + (value - input_min) * (output_max - output_min) / (input_max - input_min), output_min, output_max)
@@ -399,9 +398,29 @@ line_spacing = 30
 while True:
     try:
         bangle, bdist, bx, by, br = vision.ball_info
-        bgoal_angle, bgoal_dist, bgoal_width, bgoal_height, bgoal_rect_angle = vision.bgoal_info
-        ygoal_angle, ygoal_dist, ygoal_width, ygoal_height, ygoal_rect_angle = vision.ygoal_info
-        # print(bgoal_angle)
+        (
+            bgoal_angle,
+            bgoal_left_angle,
+            bgoal_right_angle,
+            bgoal_dist,
+            bgoal_x,
+            bgoal_y,
+            bgoal_width,
+            bgoal_height,
+            bgoal_rect_angle,
+        ) = vision.bgoal_info
+        (
+            ygoal_angle,
+            ygoal_left_angle,
+            ygoal_right_angle,
+            ygoal_dist,
+            ygoal_x,
+            ygoal_y,
+            ygoal_width,
+            ygoal_height,
+            ygoal_rect_angle,
+        ) = vision.ygoal_info
+
         if SEND_FRAME:
             vision.wait_next_frame()
             frame = vision.camera.latest_frame

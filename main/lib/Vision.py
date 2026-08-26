@@ -53,20 +53,28 @@ class Vision:
     @property
     def ball_info(self):
         angle, distance, x, y, r = self.ball_info_v[:]
-        angle = -(angle * 180 / 32767 + 90) % 360
+        angle = self.convert_angle(angle)
         return (angle, distance, x, y, r)
 
     @property
     def ygoal_info(self):
-        ang, distance, x, y, w, h, rang  = self.ygoal_info_v[:]
-        ang = -(ang * 180 / 32767 + 90) % 360
-        return (ang, distance, w, h, rang)
+        angle, left_angle, right_angle, distance, x, y, width, height, rect_angle = self.ygoal_info_v[:]
+        angle = self.convert_angle(angle)
+        left_angle = self.convert_angle(left_angle)
+        right_angle = self.convert_angle(right_angle)
+        return (angle, left_angle, right_angle, distance, x, y, width, height, rect_angle)
 
     @property
     def bgoal_info(self):
-        ang, distance, x, y, w, h, rang  = self.bgoal_info_v[:]
-        ang = -(ang * 180 / 32767 + 90) % 360
-        return (ang, distance, w, h, rang)
+        angle, left_angle, right_angle, distance, x, y, width, height, rect_angle = self.bgoal_info_v[:]
+        angle = self.convert_angle(angle)
+        left_angle = self.convert_angle(left_angle)
+        right_angle = self.convert_angle(right_angle)
+        return (angle, left_angle, right_angle, distance, x, y, width, height, rect_angle)
+
+    @staticmethod
+    def convert_angle(angle):
+        return -(angle * 180 / 32767 + 90) % 360
 
     def load_config(self, config):
         hsv = config.get_value("hsv")
