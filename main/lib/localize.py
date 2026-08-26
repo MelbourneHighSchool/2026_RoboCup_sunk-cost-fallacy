@@ -4,6 +4,7 @@ Contains localizer class
 import subprocess, threading
 from math import radians
 from imu import IMU
+from tof import ToF
 from time import sleep
 class Localizer:
     """
@@ -14,7 +15,7 @@ class Localizer:
     Use getPositionAndBearing to read output
     """
     tofDistanceFromCenter = 50
-    def __init__(self, tofs:list, imu:IMU):
+    def __init__(self, tofs:list[ToF], imu:IMU):
         self._alive = True
         self.tofs = tofs
         self.imu = imu
@@ -40,8 +41,7 @@ class Localizer:
         while self._alive:
             instruction = "i "
             for tof in self.tofs: 
-                reading = tof #TODO read value from tof
-                instruction += str(reading + self.tofDistanceFromCenter) + " "
+                instruction += str(tof.read() + self.tofDistanceFromCenter) + " "
             #TODO
             instruction += str(radians(self.imu.get_yaw())) + "\n"
             with self.cppIOLock:

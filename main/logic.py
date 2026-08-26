@@ -6,7 +6,7 @@ from lib.interface import WSServer
 from lib.kicker import Kicker
 from lib.dribbler import Dribbler
 from lib.localize import Localizer
-# from lib.tof import ToF
+from lib.tof import ToF
 
 import time
 import cv2
@@ -37,7 +37,7 @@ class Robot:
 
         self.kicker = Kicker(SOLENOID_PIN, PULSE_S)
         self.dribbler = Dribbler(self.config)
-        # self.tofs = (ToF(0x50), ToF(0x51), ToF(0x52), ToF(0x53), ToF(0x54), ToF(0x55), ToF(0x56), ToF(0x67))
+        self.tofs = (ToF(0x50), ToF(0x51), ToF(0x52), ToF(0x53), ToF(0x54), ToF(0x55), ToF(0x56), ToF(0x67))
 
         # Ball
         self.see_ball = False
@@ -74,8 +74,7 @@ class Robot:
 
         # Constants
         self.GIVE_UP_CHASING_BALL_TIME = 1.0
-        #TODO
-        self.loc = Localizer(["array","of","tofs"],self.imu)
+        self.loc = Localizer(self.tofs,self.imu)
     
     def main_loop(self):
         self.update_stuff()
