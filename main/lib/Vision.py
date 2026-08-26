@@ -20,28 +20,6 @@ import time
 OFFSET_X = -20
 OFFSET_Y = 55
 
-def enclosing_interval(angles):
-    a = np.sort(angles)
-    n = len(a)
-    
-    # gaps between consecutive sorted angles, plus the wrap-around gap
-    gaps = np.diff(a)
-    wrap_gap = (a[0] + 2*np.pi) - a[-1]
-    all_gaps = np.append(gaps, wrap_gap)
-    
-    # the largest gap is the "empty" arc - cut there
-    max_gap_idx = np.argmax(all_gaps)
-    
-    if max_gap_idx == n - 1:
-        # largest gap is the wrap-around gap itself, so interval doesn't wrap
-        start, end = a[0], a[-1]
-    else:
-        # interval wraps around; start right after the gap, end right before it
-        start = a[max_gap_idx + 1]
-        end = a[max_gap_idx]
-    
-    return start, end
-
 class Vision:
     def __init__(self):
         self.camera = Camera()
@@ -52,17 +30,17 @@ class Vision:
 
     @property
     def ball_info(self):
-        angle, distance, x, y, r = self.ball_info_v[:]
+        angle, ang_width, distance, x, y, w, h, rang = self.ball_info_v[:]
         angle = -(angle * 180 / 32767 + 90) % 360
-        return (angle, distance, x, y, r)
+        ang_width = -(ang_width * 180 / 32767 + 90) % 360
+        return (angle, ang_width, distance, w, h, rang)
 
     @property
     def ygoal_info(self):
-        ang, eang1, eang2, distance, x, y, w, h, rang  = self.ygoal_info_v[:]
-        ang = -(ang * 180 / 32767 + 90) % 360
-        eang1 = -(eang1 * 180 / 32767 + 90) % 360
-        eang2 = -(eang2 * 180 / 32767 + 90) % 360
-        return (ang, eang1, eang2, distance, w, h, rang)
+        angle, ang_width, distance, x, y, w, h, rang  = self.ygoal_info_v[:]
+        angle = -(angle * 180 / 32767 + 90) % 360
+        ang_width = -(ang_width * 180 / 32767 + 90) % 360
+        return (angle, ang_width, distance, w, h, rang)
 
     @property
     def bgoal_info(self):
@@ -160,8 +138,8 @@ class Vision:
     def goal_proc_setup(self):
         self.goal_bounds_v = Array(c_uint8, (140, 200, 80, 180, 255, 150, 35, 120, 50, 45, 255, 255))  # 2 bgoal HSV bounds, ygoal HSV bounds
         # I just removed ke (constant of 3 at the end of the array), hopefully nothing breaks
-        self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0, 0))  # center angle, left angle, right angle, distance, x, y, w, h, rect_angle
-        self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0, 0))
+        self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0))  # center angle, left angle, right angle, distance, x, y, w, h, rect_angle
+        self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0))
         self.enabled_goals_v = Value(c_uint8, 3)  # 2^0 bit: Blue goal enabled, 2^1 bit: Yellow goal enabled
 
         self.broadcaster.register_proc(
@@ -204,46 +182,42 @@ class Vision:
         # Do once for blue goal, do once for yellow goal
         for enabled_flag, lbound, ubound, goal_info_v in ((1, cfg[0:3], cfg[3:6], bgoal_info_v), (2, cfg[6:9], cfg[9:12], ygoal_info_v)):
             if not enabled_goals & enabled_flag:  # Flag for enabling that color goal (1 blue, 2 yellow)
-                goal_info_v[:] = (0, 0, 0, 0, 0, 0, 0, 0, 0)
+                goal_info_v[:] = (0, 0, 0, 0, 0, 0, 0, 0)
                 continue
 
             cv2.inRange(frame, lbound, ubound, goal_mask_frame)  # Replace with hsv_frame if using
             goalContours = cv2.findContours(goal_mask_frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
             if not goalContours:
-                goal_info_v[:] = (0, 0, 0, 0, 0, 0, 0, 0, 0)
+                goal_info_v[:] = (0, 0, 0, 0, 0, 0, 0, 0)
                 continue
 
             bestContour = max(goalContours, key=cv2.contourArea)
             rect = cv2.minAreaRect(bestContour)
 
-            rect_points = cv2.boxPoints(rect)  # Gives corners as [(x1, y1), (x2, y2)...]
-            rect_point_angles = list(np.arctan2(rect_points[:, 1], rect_points[:, 0]))
-            leftest, rightest = enclosing_interval(rect_point_angles)
-            rect_point_angles.remove(leftest)
-            rect_point_angles.remove(rightest)
-            left_angle, right_angle = rect_point_angles  # Non min/max points
-
-
             (goal_center_x, goal_center_y), (goal_width, goal_height), rect_angle = rect
-
-            # polygon = cv2.approxPolyDP(bestContour, ke * cv2.arcLength(bestContour, True), True)
-            # goal_center_x, goal_center_y = np.mean(polygon[:, 0, :], axis=0).astype(np.int16)
 
             center_x = frame_shape[1] // 2 + OFFSET_X
             center_y = frame_shape[0] // 2 + OFFSET_Y
             relative_x = goal_center_x - center_x
             relative_y = goal_center_y - center_y
+
             distance = min(32767, int(np.hypot(relative_x, relative_y)))
             angle = int(np.arctan2(relative_y, relative_x) / np.pi * 32767)
-            left_angle = int(left_angle / np.pi * 32767)
-            right_angle = int(right_angle / np.pi * 32767)
+
+            rect_points = cv2.boxPoints(rect)  # Gives corners as [(x1, y1), (x2, y2)...]
+            rect_point_angles = (np.arctan2(rect_points[:, 1] - center_y, rect_points[:, 0] - center_x) / np.pi * 32767).astype(np.int16)
+            angular_goal_width = min(np.abs(rect_point_angles - angle))
+
+            # polygon = cv2.approxPolyDP(bestContour, ke * cv2.arcLength(bestContour, True), True)
+            # goal_center_x, goal_center_y = np.mean(polygon[:, 0, :], axis=0).astype(np.int16)
+
             goal_center_x = int(goal_center_x)
             goal_center_y = int(goal_center_y)
             goal_width = int(goal_width)
             goal_height = int(goal_height)
             rect_angle = int(rect_angle)
 
-            goal_info_v[:] = angle, left_angle, right_angle, distance, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle
+            goal_info_v[:] = angle, angular_goal_width, distance, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle
             # time.sleep(0.5)  # DEBUG
             # if enabled_flag == 1:  # DEBUG
                 # cv2.imwrite("/var/www/html/frame.jpg", np.hstack((cv2.cvtColor(goal_mask_frame, cv2.COLOR_GRAY2BGR), frame, hsv_frame)))  # DEBUG
