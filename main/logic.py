@@ -5,7 +5,7 @@ from lib.drive import Drive
 from lib.interface import WSServer
 from lib.kicker import Kicker
 from lib.dribbler import Dribbler
-
+from lib.localize import Localizer
 import time
 import cv2
 import numpy as np
@@ -70,7 +70,8 @@ class Robot:
 
         # Constants
         self.GIVE_UP_CHASING_BALL_TIME = 1.0
-
+        #TODO
+        self.loc = Localizer(["array","of","tofs"],self.imu)
     
     def main_loop(self):
         self.update_stuff()
