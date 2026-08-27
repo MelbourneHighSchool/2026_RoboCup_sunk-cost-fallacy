@@ -50,7 +50,7 @@ class Robot:
         self.GIVE_UP_CHASING_BALL_TIME = 0.5
 
         # Goal
-        self.TARGET_GOAL_IS_BLUE = False
+        self.TARGET_GOAL_IS_BLUE = True
         self.see_goal = False
         self.goal_dir = None
         self.goal_dist = None
@@ -75,18 +75,18 @@ class Robot:
     def main_loop(self):
         self.update_stuff()
 
-        # self.ball_capture()
         self.attack_loop()
         # self.defence_loop()
-
+        # if self.see_goal:
+        #     self.yaw_correct(self.to_absolute_dir(self.goal_dir))
+        # self.yaw_correct()
         self.move()
 
         # DEBUG
-        # print(self.ball_dir, self.ball_dist, self.have_ball)
-        # print(self.goal_dir, self.goal_dist)
+        print(self.ball_dir, self.ball_dist, self.have_ball)
+        # print(self.goal_dir, self.goal_ang_width, self.goal_dist)
         # print(self.own_goal_dir, self.own_goal_dist)
-        # time.sleep(0.1)
-        # print(self.loc.getPositionAndBearing())
+        
     
     def attack_loop(self):
         if not self.have_ball:
@@ -156,9 +156,9 @@ class Robot:
         self.move_dir = self.to_relative_dir(self.wrap_angle(move_angle))
 
     def ball_capture(self):
-        MOVE_FORWARD_ANGLE = 35  # ±
-        ORBIT_RADIUS = 70
-        SPD_MAX = 0.3
+        MOVE_FORWARD_ANGLE = 45  # ±
+        ORBIT_RADIUS = 85
+        SPD_MAX = 0.25
         SPD_MIN = 0.05
 
         self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.05, 80)
@@ -166,7 +166,7 @@ class Robot:
         if abs(self.ball_dir) < 10:
             self.move_dir = self.ball_dir
         elif abs(self.ball_dir) < MOVE_FORWARD_ANGLE:
-            self.move_dir = self.ball_dir * 2.5
+            self.move_dir = self.ball_dir * 3
         elif self.ball_dist <= ORBIT_RADIUS:
             distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
             orbit_angle = 90 + distance_ratio * 90
@@ -193,31 +193,38 @@ class Robot:
             self.ball_dist = None
 
         # Possession
-        self.have_ball = self.see_ball and self.ball_dist < 35 and abs(self.ball_dir) < 5
+        self.have_ball = self.see_ball and self.ball_dist < 55 and -15 < self.ball_dir < -5
 
     def update_goal_info(
             self,
             bgoal_angle,
-            bgoal_left_angle,
-            bgoal_right_angle,
+            bgoal_ang_width,
             bgoal_dist,
             ygoal_angle,
-            ygoal_left_angle,
-            ygoal_right_angle,
+            ygoal_ang_width,
             ygoal_dist,
     ):
             if self.TARGET_GOAL_IS_BLUE:
                 target_angle, target_dist = bgoal_angle, bgoal_dist
                 own_angle, own_dist = ygoal_angle, ygoal_dist
+                goal_ang_width = bgoal_ang_width
+                own_goal_ang_width = ygoal_ang_width
             else:
                 target_angle, target_dist = ygoal_angle, ygoal_dist
                 own_angle, own_dist = bgoal_angle, bgoal_dist
+                goal_ang_width = ygoal_ang_width
+                own_goal_ang_width = bgoal_ang_width
+
             self.goal_dir = self.wrap_angle(target_angle) if target_dist != 0 else None
+            self.goal_ang_width = self.wrap_angle(goal_ang_width) if target_dist != 0 else None
             self.goal_dist = self.approx_real_dist(target_dist) / 10 if target_dist != 0 else None
             self.see_goal = self.goal_dir is not None and self.goal_dist is not None
             self.own_goal_dir = self.wrap_angle(own_angle) if own_dist != 0 else None
             self.own_goal_dist = self.approx_real_dist(own_dist) / 10 if own_dist != 0 else None
+            self.own_goal_ang_width = self.wrap_angle(own_goal_ang_width) if target_dist != 0 else None
             self.see_own_goal = self.own_goal_dir is not None and self.own_goal_dist is not None
+
+            
 
     def update_stuff(self):
         # IMU
@@ -237,18 +244,21 @@ class Robot:
         #     self.region = RobotRegions.MIDDLE
         # else:
         #     self.region = RobotRegions.NONE
+
+        self.pos_x, self.pos_y = self.loc.getPosition()
     
     # ----- Actions ----- #
     def move(self):
         # self.avoid_out_of_bounds()
         self.drive.move(self.move_dir, self.move_spd, self.rot_spd)
+        # self.drive.move(0, 0, self.rot_spd)
 
     def avoid_out_of_bounds(self):
-        BOUND_LINE_X = 635 + 10     # mm, ±
-        BOUND_LINE_Y = 940 + 10     # mm, ±
-        START_SLOWDOWN_X_DIST = 100
-        START_SLOWDOWN_Y_DIST = 100
-        AVOID_WALL_SPD = 0.03
+        BOUND_LINE_X = 450 + 10     # mm, ±
+        BOUND_LINE_Y = 650 + 10     # mm, ±
+        START_SLOWDOWN_X_DIST = 50
+        START_SLOWDOWN_Y_DIST = 50
+        AVOID_WALL_SPD = 0.01
 
         if self.move_dir is None or self.move_spd is None:
             return
@@ -399,11 +409,8 @@ while True:
         # Blue goal
         (
             bgoal_angle,
-            bgoal_left_angle,
-            bgoal_right_angle,
+            bgoal_ang_width,
             bgoal_dist,
-            bgoal_x,
-            bgoal_y,
             bgoal_width,
             bgoal_height,
             bgoal_rect_angle,
@@ -412,11 +419,8 @@ while True:
         # Yellow goal
         (
             ygoal_angle,
-            ygoal_left_angle,
-            ygoal_right_angle,
+            ygoal_ang_width,
             ygoal_dist,
-            ygoal_x,
-            ygoal_y,
             ygoal_width,
             ygoal_height,
             ygoal_rect_angle,
@@ -438,12 +442,10 @@ while True:
         robot.update_ball_info(bangle, bdist)
         robot.update_goal_info(
             bgoal_angle,
-            bgoal_left_angle,
-            bgoal_right_angle,
+            bgoal_ang_width,
             bgoal_dist,
             ygoal_angle,
-            ygoal_left_angle,
-            ygoal_right_angle,
+            ygoal_ang_width,
             ygoal_dist
         )
 
