@@ -44,9 +44,15 @@ class Vision:
 
     @property
     def bgoal_info(self):
-        ang, distance, x, y, w, h, rang  = self.bgoal_info_v[:]
-        ang = -(ang * 180 / 32767 + 90) % 360
-        return (ang, distance, w, h, rang)
+        angle, left_angle, right_angle, distance, x, y, width, height, rect_angle = self.bgoal_info_v[:]
+        angle = self.convert_angle(angle)
+        left_angle = self.convert_angle(left_angle)
+        right_angle = self.convert_angle(right_angle)
+        return (angle, left_angle, right_angle, distance, x, y, width, height, rect_angle)
+
+    @staticmethod
+    def convert_angle(angle):
+        return -(angle * 180 / 32767 + 90) % 360
 
     def load_config(self, config):
         hsv = config.get_value("hsv")
@@ -71,7 +77,7 @@ class Vision:
     
     # Ball proc
     def ball_proc_setup(self):
-        self.ball_bounds_v = Array(c_uint8, (0, 120, 160, 30, 255, 255))  # (lboundH, S, V, uboundH, S, V) - change defaults later!
+        self.ball_bounds_v = Array(c_uint8, (0, 100, 200, 30, 255, 255))  # (lboundH, S, V, uboundH, S, V) - change defaults later!
         self.ball_info_v = Array(c_int16, (0, 0, 0, 0, 0))  # angle, dist, x, y, r
 
         self.broadcaster.register_proc(
@@ -136,7 +142,7 @@ class Vision:
     
     # Goal proc
     def goal_proc_setup(self):
-        self.goal_bounds_v = Array(c_uint8, (140, 200, 80, 180, 255, 150, 35, 120, 50, 45, 255, 255))  # 2 bgoal HSV bounds, ygoal HSV bounds
+        self.goal_bounds_v = Array(c_uint8, (110, 200, 200, 150, 255, 255, 35, 120, 50, 45, 255, 255))  # 2 bgoal HSV bounds, ygoal HSV bounds
         # I just removed ke (constant of 3 at the end of the array), hopefully nothing breaks
         self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0))  # center angle, left angle, right angle, distance, x, y, w, h, rect_angle
         self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0))

@@ -4,13 +4,13 @@ TODO
 - Force async server, avoid lag during debug
 """
 
-from websocket.sync.server import serve
-import websocket
+from websockets.sync.server import serve
+import websockets
 import json
 import threading
 import cv2
 import base64
-import socket
+import queue
 
 class WSServerHandlerID:
     def __init__(self, message, index):
@@ -25,6 +25,35 @@ class WSServer:
         self.registered = False
 
         self.handlers = {}
+
+        self.send_buffer = queue.Queue()
+
+    def _server_loop(self):
+        print(f"Starting WebSocket server on ws://{self.host}:{self.port}")
+        with serve(self.client_handler, self.host, self.port) as server:
+            server.serve_forever()
+
+    def _send_loop(self):
+        while True:
+            if not self.send_buffer.empty():
+                message = self.send_buffer.get()
+                if type(message) is not dict:
+                    # Encode as image
+                    ret, buffer = cv2.imencode('.jpg', message)
+                    if ret:
+                        frame_base64 = base64.b64encode(buffer).decode('utf-8')
+                        self._broadcast({"message": "image", "data": frame_base64})
+                else:
+                    self._broadcast(message)
+
+    def run(self):
+        self.run_thread = threading.Thread(target=self._server_loop, daemon=True)
+        self.send_thread = threading.Thread(target=self._send_loop, daemon=True)
+
+        self.run_thread.start()
+        self.send_thread.start()
+
+    # HANDLERS
 
     def add_handler(self, message, callback):
         if self.handlers.get(message) is None:
@@ -49,25 +78,35 @@ class WSServer:
             if self.handlers.get(message) is not None:
                 self.handlers[message] = []
 
+    # BOT HANDLING
+
     def register_client(self, websocket):
         self.clients.append(websocket)
-        print(f"Client connected. Total clients: {len(self.clients)}")
 
     def unregister_client(self, websocket):
         self.clients.remove(websocket)
-        print(f"Client disconnected. Total clients: {len(self.clients)}")
 
-    def broadcast(self, message):
+    def client_handler(self, websocket):
+            self.register_client(websocket)
+            try:
+                for message in websocket:
+                    self.handle_message(websocket, message)
+            except websockets.exceptions.ConnectionClosed:
+                pass
+            finally:
+                self.unregister_client(websocket)
+
+    # MESSAGE HANDLING
+
+    def _broadcast(self, message):
         if self.clients:
             for client in self.clients:
                 client.send(json.dumps(message))
 
-    def send_frame(self, frame):
-        ret, buffer = cv2.imencode('.jpg', frame)
-
-        if ret:
-            frame_base64 = base64.b64encode(buffer).decode('utf-8')
-            self.broadcast({"message": "image", "data": frame_base64})
+    def send_frame(self, message):
+        """Send a frame or message to all connected clients."""
+        self.send_buffer.put(message)
+        return True
 
     def handle_message(self, websocket, message):
         try:
@@ -87,26 +126,6 @@ class WSServer:
 
         except json.JSONDecodeError:
             websocket.send(json.dumps({"message":"error", "error": "Invalid JSON"}))
-
-    def client_handler(self, websocket):
-        self.register_client(websocket)
-        try:
-            for message in websocket:
-                self.handle_message(websocket, message)
-        except websockets.exceptions.ConnectionClosed:
-            pass
-        finally:
-            self.unregister_client(websocket)
-
-    def _start_server(self):
-        print(f"Starting WebSocket server on ws://{self.host}:{self.port}")
-        with serve(self.client_handler, self.host, self.port) as server:
-            server.serve_forever()
-
-
-    def run(self):
-        self.run_thread = threading.Thread(target=self._start_server, daemon=True)
-        self.run_thread.start()
 
 if __name__ == "__main__":
     import cv2
