@@ -19,13 +19,13 @@ SOLENOID_PIN = board.D21
 PULSE_S = 0.02
 
 # -----------------------------------------------------------------------------------------------------------
-# class RobotRegions(Enum):
-#     NONE = 0
-#     GOAL_SIDE = 1
-#     MIDDLE = 2
-#     MIDDLE_SIDE = 3
-#     OWN_GOAL = 4
-#     OWN_GOAL_SIDE = 5
+class RobotRegions(Enum):
+    NONE = 0
+    GOAL_SIDE = 1
+    MIDDLE = 2
+    MIDDLE_SIDE = 3
+    OWN_GOAL = 4
+    OWN_GOAL_SIDE = 5
 
 class Robot:
     def __init__(self, drive=None, imu=None, config=None):
@@ -50,6 +50,7 @@ class Robot:
         self.GIVE_UP_CHASING_BALL_TIME = 0.5
 
         # Goal
+        self.TARGET_GOAL_IS_BLUE = True
         self.see_goal = False
         self.goal_dir = None
         self.goal_dist = None
@@ -66,14 +67,12 @@ class Robot:
 
         # Position & Orientation
         self.bot_dir = 0
+        self.loc = Localizer(self.tofs, self.imu)
         self.pos_x = 0
         self.pos_y = -450
-        self._yaw_error = 0
-        self._yaw_error_time = time.monotonic()
-
-        # Constants
-        self.GIVE_UP_CHASING_BALL_TIME = 1.0
-        self.loc = Localizer(self.tofs,self.imu)
+        self.yaw_error = 0
+        self.yaw_error_time = time.monotonic()
+        
     
     def main_loop(self):
         self.update_stuff()
@@ -199,15 +198,13 @@ class Robot:
     def update_goal_info(
             self,
             bgoal_angle,
+            bgoal_left_angle,
+            bgoal_right_angle,
             bgoal_dist,
-            bgoal_width,
-            bgoal_height,
-            bgoal_rect_angle,
             ygoal_angle,
+            ygoal_left_angle,
+            ygoal_right_angle,
             ygoal_dist,
-            ygoal_width,
-            ygoal_height,
-            ygoal_rect_angle,
     ):
             if self.TARGET_GOAL_IS_BLUE:
                 target_angle, target_dist = bgoal_angle, bgoal_dist
@@ -243,7 +240,7 @@ class Robot:
     
     # ----- Actions ----- #
     def move(self):
-        # self.avoid_out_of_bounds() # modifies move_dir and move_spd
+        # self.avoid_out_of_bounds()
         self.drive.move(self.move_dir, self.move_spd, self.rot_spd)
 
     def avoid_out_of_bounds(self):
@@ -308,19 +305,19 @@ class Robot:
 
         if abs(error) < tolerance:
             self.rot_spd = 0
-            self._yaw_error = error
-            self._yaw_error_time = time.monotonic()
+            self.yaw_error = error
+            self.yaw_error_time = time.monotonic()
             return self.rot_spd
 
         now = time.monotonic()
-        dt = now - self._yaw_error_time
-        derivative = (error - self._yaw_error) / dt if dt > 0 else 0
+        dt = now - self.yaw_error_time
+        derivative = (error - self.yaw_error) / dt if dt > 0 else 0
         derivative = self.clamp(derivative, -100, 100)
         correction = kp * error + kd * derivative
         self.rot_spd = self.clamp(speed * correction, -abs(max_spd), abs(max_spd))
-        self._yaw_error = error
-        self._yaw_error_time = now
-
+        self.yaw_error = error
+        self.yaw_error_time = now
+        
     def rotate_about_dribbler(self, dir, speed=0.05):
         """Input: dir = 1 for clockwise, 1 for anticlockwise"""
         RATIO_CONSTANT = 1 # 1 happened to work
@@ -339,7 +336,7 @@ class Robot:
             return (theta + 180) % 360 - 180
 
     @staticmethod
-    def sigmoid(value, min=0, max=1, steepness=1, centre=0):
+    def sigmoid(value, min=0, max=1, steepness=0.1, centre=0):
             # https://www.desmos.com/calculator/jkqwos4tzh
             a = math.exp(steepness * (centre - value))
             return (max - min) * (1 / (1 + a)) + min
@@ -397,7 +394,10 @@ line_spacing = 30
 
 while True:
     try:
+        # Ball
         bangle, bdist, bx, by, br = vision.ball_info
+
+        # Blue goal
         (
             bgoal_angle,
             bgoal_left_angle,
@@ -409,6 +409,8 @@ while True:
             bgoal_height,
             bgoal_rect_angle,
         ) = vision.bgoal_info
+
+        # Yellow goal
         (
             ygoal_angle,
             ygoal_left_angle,
@@ -437,15 +439,13 @@ while True:
         robot.update_ball_info(bangle, bdist)
         robot.update_goal_info(
             bgoal_angle,
+            bgoal_left_angle,
+            bgoal_right_angle,
             bgoal_dist,
-            bgoal_width,
-            bgoal_height,
-            bgoal_rect_angle,
             ygoal_angle,
-            ygoal_dist,
-            ygoal_width,
-            ygoal_height,
-            ygoal_rect_angle,
+            ygoal_left_angle,
+            ygoal_right_angle,
+            ygoal_dist
         )
 
         robot.main_loop()
