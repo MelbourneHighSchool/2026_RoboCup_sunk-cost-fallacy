@@ -5,8 +5,8 @@ from lib.drive import Drive
 from lib.interface import WSServer
 from lib.kicker import Kicker
 from lib.dribbler import Dribbler
-from lib.localize import Localizer
-from lib.tof import ToF
+# from lib.localize import Localizer
+# from lib.tof import ToF
 
 import time
 import cv2
@@ -37,7 +37,7 @@ class Robot:
 
         self.kicker = Kicker(SOLENOID_PIN, PULSE_S)
         self.dribbler = Dribbler(self.config)
-        self.tofs = (ToF(0x50), ToF(0x51), ToF(0x52), ToF(0x53), ToF(0x54), ToF(0x55), ToF(0x56), ToF(0x67))
+        # self.tofs = (ToF(0x50), ToF(0x51), ToF(0x52), ToF(0x53), ToF(0x54), ToF(0x55), ToF(0x56), ToF(0x67))
 
         # Ball
         self.see_ball = False
@@ -62,12 +62,10 @@ class Robot:
         self.move_spd = 0
         self.move_dir = 0
         self.rot_spd = 0
-        self.yaw_target = 0
-        self.enable_yaw_correct = True
 
         # Position & Orientation
         self.bot_dir = 0
-        self.loc = Localizer(self.tofs, self.imu)
+        # self.loc = Localizer(self.tofs, self.imu)
         self.pos_x = 0
         self.pos_y = -450
         self.yaw_error = 0
@@ -83,21 +81,21 @@ class Robot:
         self.move()
 
         # DEBUG
-        # print(self.ball_dir, self.ball_dist, self.have_ball)
+        print(self.ball_dir, self.ball_dist, self.have_ball)
         # print(self.goal_dir, self.goal_dist)
         # print(self.own_goal_dir, self.own_goal_dist)
         
     
     def attack_loop(self):
-        if self.enable_yaw_correct:
+        if not self.have_ball:
             if self.see_goal:
-                angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.3
+                angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.1
                 self.yaw_correct(self.to_absolute_dir(angle))
+
         if self.have_ball:
             self.kick()
             pass
         elif self.see_ball:
-            
             self.ball_capture()
         else:
             self.move_spd = 0
@@ -112,7 +110,6 @@ class Robot:
         if not self.see_own_goal:
             self.rot_spd = 0
             self.move_spd = 0
-            self.yaw_target = self.bot_dir
             return
   
         if KEEP_DIST - TOLERANCE < self.own_goal_dist < KEEP_DIST + TOLERANCE:
@@ -193,7 +190,8 @@ class Robot:
             self.ball_dir = None
             self.ball_dist = None
 
-        self.have_ball = self.see_ball and self.ball_dist < 52
+        # Possession
+        self.have_ball = self.see_ball and self.ball_dist < 40 and abs(self.ball_dir) < 10
 
     def update_goal_info(
             self,
@@ -218,7 +216,7 @@ class Robot:
             self.own_goal_dir = self.wrap_angle(own_angle) if own_dist != 0 else None
             self.own_goal_dist = self.approx_real_dist(own_dist) / 10 if own_dist != 0 else None
             self.see_own_goal = self.own_goal_dir is not None and self.own_goal_dist is not None
-        
+
     def update_stuff(self):
         # IMU
         self.bot_dir = -1 * self.wrap_angle(self.imu.get_yaw())
@@ -296,7 +294,6 @@ class Robot:
 
     def yaw_correct(self, target_angle=0.0, max_spd=0.3, speed=1.0, kp=0.001, kd=0.00001, tolerance=2):
         """PD Yaw correction"""
-        self.yaw_target = self.wrap_angle(target_angle)
         if self.bot_dir is None:
             self.rot_spd = 0
             return
@@ -321,7 +318,6 @@ class Robot:
     def rotate_about_dribbler(self, dir, speed=0.05):
         """Input: dir = 1 for clockwise, 1 for anticlockwise"""
         RATIO_CONSTANT = 1 # 1 happened to work
-        self.enable_yaw_correct = False
         self.rot_spd = speed * dir
         self.move_dir = -1 * np.sign(dir) * 90
         self.move_spd = RATIO_CONSTANT * speed
@@ -363,6 +359,7 @@ class Robot:
         Output: pproximate real distance in mm"""
         # https://www.desmos.com/calculator/gkbgcxzhoo
 
+        # Please don't change this because so many constants are based on this
         if pixel_dist is None or pixel_dist == 0.0:
             return None
         approx_real_dist_cm = 10**((pixel_dist + 75)/165)
