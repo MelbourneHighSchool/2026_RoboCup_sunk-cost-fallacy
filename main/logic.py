@@ -5,8 +5,8 @@ from lib.drive import Drive
 from lib.interface import WSServer
 from lib.kicker import Kicker
 from lib.dribbler import Dribbler
-# from lib.localize import Localizer
-# from lib.tof import ToF
+from lib.localize import Localizer
+from lib.tof import ToF
 
 import time
 import cv2
@@ -37,7 +37,7 @@ class Robot:
 
         self.kicker = Kicker(SOLENOID_PIN, PULSE_S)
         self.dribbler = Dribbler(self.config)
-        # self.tofs = (ToF(0x50), ToF(0x51), ToF(0x52), ToF(0x53), ToF(0x54), ToF(0x55), ToF(0x56), ToF(0x67))
+        self.tofs = (ToF(0x50), ToF(0x51), ToF(0x52), ToF(0x53), ToF(0x54), ToF(0x55), ToF(0x56), ToF(0x5f))
 
         # Ball
         self.see_ball = False
@@ -50,7 +50,7 @@ class Robot:
         self.GIVE_UP_CHASING_BALL_TIME = 0.5
 
         # Goal
-        self.TARGET_GOAL_IS_BLUE = True
+        self.TARGET_GOAL_IS_BLUE = False
         self.see_goal = False
         self.goal_dir = None
         self.goal_dist = None
@@ -65,7 +65,7 @@ class Robot:
 
         # Position & Orientation
         self.bot_dir = 0
-        # self.loc = Localizer(self.tofs, self.imu)
+        self.loc = Localizer(self.tofs, self.imu)
         self.pos_x = 0
         self.pos_y = -450
         self.yaw_error = 0
@@ -75,21 +75,23 @@ class Robot:
     def main_loop(self):
         self.update_stuff()
 
+        # self.ball_capture()
         self.attack_loop()
         # self.defence_loop()
 
         self.move()
 
         # DEBUG
-        print(self.ball_dir, self.ball_dist, self.have_ball)
+        # print(self.ball_dir, self.ball_dist, self.have_ball)
         # print(self.goal_dir, self.goal_dist)
         # print(self.own_goal_dir, self.own_goal_dist)
-        
+        # time.sleep(0.1)
+        # print(self.loc.getPositionAndBearing())
     
     def attack_loop(self):
         if not self.have_ball:
             if self.see_goal:
-                angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.1
+                angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.25
                 self.yaw_correct(self.to_absolute_dir(angle))
 
         if self.have_ball:
@@ -103,7 +105,7 @@ class Robot:
             self.stop_dribbler()
 
     def defence_loop(self):
-        KEEP_DIST = 50
+        KEEP_DIST = 60
         TOLERANCE = 5
         GOAL_WEIGHT = 0.1
         BALL_WEIGHT = 1.0
@@ -154,7 +156,7 @@ class Robot:
         self.move_dir = self.to_relative_dir(self.wrap_angle(move_angle))
 
     def ball_capture(self):
-        MOVE_FORWARD_ANGLE = 45  # ±
+        MOVE_FORWARD_ANGLE = 35  # ±
         ORBIT_RADIUS = 70
         SPD_MAX = 0.3
         SPD_MIN = 0.05
@@ -191,7 +193,7 @@ class Robot:
             self.ball_dist = None
 
         # Possession
-        self.have_ball = self.see_ball and self.ball_dist < 40 and abs(self.ball_dir) < 10
+        self.have_ball = self.see_ball and self.ball_dist < 35 and abs(self.ball_dir) < 5
 
     def update_goal_info(
             self,

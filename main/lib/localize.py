@@ -2,9 +2,9 @@
 Contains localizer class
 """
 import subprocess, threading
-from math import radians
-from imu import IMU
-from tof import ToF
+from math import radians, degrees
+from lib.imu import IMU
+from lib.tof import ToF
 from time import sleep
 class Localizer:
     """
@@ -20,7 +20,7 @@ class Localizer:
         self.tofs = tofs
         self.imu = imu
         self.cppModule = subprocess.Popen(
-            ["localizeFast.bin"], #decide filetype later
+            ["lib/localizeFast"], #decide filetype later
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             text=True,
@@ -38,15 +38,20 @@ class Localizer:
 
     def _tofUpdator(self):
         # integrate imu and tof update loops with this update loop for less latency?
+        readings = [2000] * 8
         while self._alive:
             instruction = "i "
-            for tof in self.tofs: 
-                instruction += str(tof.read() + self.tofDistanceFromCenter) + " "
+            for i, tof in enumerate(self.tofs):
+                reading = tof.read()
+                if reading:
+                    readings[i] = reading + 40
             #TODO
+            instruction += " ".join(map(str, readings)) + " "
             instruction += str(radians(self.imu.get_yaw())) + "\n"
             with self.cppIOLock:
                 self.cppModule.stdin.write(instruction)
-                self.cppModule.stdin.flush()      
+                self.cppModule.stdin.flush()
+                # print("===========================\n\nYo guys we wrote B)\n\n======================")
             #sync with update cycle maybe idk
             sleep(0.01)
 
@@ -54,14 +59,21 @@ class Localizer:
         with self.cppIOLock:
             self.cppModule.stdin.write("o\n")
             self.cppModule.stdin.flush()
-        return (self.cppModule.stdout.readline(), self.cppModule.stdout.readline()), self.cppModule.stdout.readline()
+        output = (self.cppModule.stdout.readline(), self.cppModule.stdout.readline()), self.cppModule.stdout.readline(), self.cppModule.stdout.readline()
+        # print(output)
+        x, y = output[0]
+        x = float(x[:-1])
+        y = float(y[:-1])
+        bearing = degrees(float(output[1][:-1]))
+        sensor_data = output[2]
+        return ((x, y), bearing, sensor_data)
 
 if __name__ == "__main__":
     loc = Localizer([1,2,3,4,5,6,7,8], "imu") # TODO TODO TODO
 
     try:
         while True:
-            print(loc.getPositionAndBearing())
+            print(f"Yo we got a successful reading up here {loc.getPositionAndBearing()}")
     finally:
         loc.kill()
 

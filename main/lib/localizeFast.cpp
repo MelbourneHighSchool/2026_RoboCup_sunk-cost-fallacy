@@ -46,7 +46,7 @@ void estDistances(float* px, float* py, float* a, array<float,8>::iterator start
 random_device rd;
 mt19937 gen(rd());
 uniform_real_distribution<float> dis01f(0.0, 1.0);
-bernoulli_distribution disBool(0.9);
+bernoulli_distribution disBool(1);
 auto rnd = bind(dis01f, gen);
 auto rndBool = bind(disBool, gen);
 array<int,8> targetDists;
@@ -158,6 +158,12 @@ int main(){
         } else if (action == 'o'){
             outlock.lock();
             cout << bestX << "\n" << bestY << "\n" << bestAngle <<"\n";
+            inlock.lock();
+            for (int i = 0; i < 8; i++){
+                cout << targetDists[i] << " ";
+            }
+            cout << "\n";
+            inlock.unlock();
             cout.flush();
             outlock.unlock();
         } else if (action == 'e'){
