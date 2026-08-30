@@ -7,6 +7,7 @@ from lib.kicker import Kicker
 from lib.dribbler import Dribbler
 from lib.localize import Localizer
 from lib.tof import ToF
+from lib.PDcontroller import PDController
 
 import time
 import cv2
@@ -34,6 +35,7 @@ class Robot:
         self.imu = imu if imu is not None else IMU()
         self.imu.calibrate_yaw()
         self.drive = drive if drive is not None else Drive.from_config(self.config)
+        self.yaw_pd_controller = PDController(kp=0.001, kd=0.00001)
 
         self.kicker = Kicker(SOLENOID_PIN, PULSE_S)
         self.dribbler = Dribbler(self.config)
@@ -67,7 +69,7 @@ class Robot:
         self.bot_dir = 0
         self.loc = Localizer(self.tofs, self.imu)
         self.pos_x = 0
-        self.pos_y = -450
+        self.pos_y = -350
         self.yaw_error = 0
         self.yaw_error_time = time.monotonic()
         
@@ -77,9 +79,7 @@ class Robot:
 
         self.attack_loop()
         # self.defence_loop()
-        # if self.see_goal:
-        #     self.yaw_correct(self.to_absolute_dir(self.goal_dir))
-        # self.yaw_correct()
+
         self.move()
 
         # DEBUG
@@ -105,36 +105,38 @@ class Robot:
             self.stop_dribbler()
 
     def defence_loop(self):
-        KEEP_DIST = 60
-        TOLERANCE = 5
+        KEEP_DIST = 400
+        TOLERANCE = 30
         GOAL_WEIGHT = 0.1
         BALL_WEIGHT = 1.0
+        SPD_MAX = 0.3
+
         if not self.see_own_goal:
             self.rot_spd = 0
             self.move_spd = 0
             return
-  
+
+        # Maintain constant distance with goal
         if KEEP_DIST - TOLERANCE < self.own_goal_dist < KEEP_DIST + TOLERANCE:
             move_dir_goal = 0
         elif self.own_goal_dist > KEEP_DIST + TOLERANCE:
             move_dir_goal = self.own_goal_dir
         else:
             move_dir_goal = self.own_goal_dir + 180
-            
+
+        # Ball blocking
         if self.see_ball:
+            # Try to block ball by moving into the line between ball and goal
             abs_goal_dir = self.to_absolute_dir(self.own_goal_dir)
             abs_ball_dir = self.to_absolute_dir(self.ball_dir)
             diff = self.wrap_angle(abs_goal_dir - abs_ball_dir)
-            move_dir_ball = self.to_absolute_dir(np.sign(diff) * 90)
+            move_dir_ball = self.to_absolute_dir(np.sign(diff) * 90) # Move either left or right
 
-            # Face the circular midpoint between the ball and the direction
-            # opposite the goal, keeping the two objects on opposite sides.
-            target_x = math.sin(math.radians(abs_ball_dir)) - math.sin(math.radians(abs_goal_dir))
-            target_y = math.cos(math.radians(abs_ball_dir)) - math.cos(math.radians(abs_goal_dir))
-            angle_target = math.degrees(math.atan2(target_x, target_y))
-            self.yaw_correct(self.wrap_angle(angle_target), tolerance=12)
+            self.yaw_correct(self.to_absolute_dir(self.ball_dir))
         else:
-            self.yaw_correct(self.to_absolute_dir(self.own_goal_dir) + 180, tolerance=12)
+            self.yaw_correct(self.to_absolute_dir(self.own_goal_dir) + 180, tolerance=10)
+
+            # No ball to block, just maintain constant distance with goal
             if move_dir_goal == 0:
                 self.move_spd = 0
             else:
@@ -142,48 +144,25 @@ class Robot:
                 self.move_dir = move_dir_goal
             return
 
+        # Add weighted vectors (blocking ball is given much more weight than keeping distance)
         goal_angle = math.radians(self.to_absolute_dir(move_dir_goal))
         ball_angle = math.radians(move_dir_ball)
         move_vec_x = GOAL_WEIGHT * math.sin(goal_angle) + BALL_WEIGHT * math.sin(ball_angle)
         move_vec_y = GOAL_WEIGHT * math.cos(goal_angle) + BALL_WEIGHT * math.cos(ball_angle)
-
-        self.move_spd = min(0.2, math.hypot(move_vec_x, move_vec_y))
-        if self.move_spd == 0:
-            self.move_dir = 0
-            return
+        self.move_spd = min(SPD_MAX, math.hypot(move_vec_x, move_vec_y))
 
         move_angle = math.degrees(math.atan2(move_vec_x, move_vec_y))
-        self.move_dir = self.to_relative_dir(self.wrap_angle(move_angle))
+        self.move_dir = self.to_relative_dir(move_angle)
 
-    def ball_capture(self):
-        MOVE_FORWARD_ANGLE = 45  # ±
-        ORBIT_RADIUS = 85
-        SPD_MAX = 0.25
-        SPD_MIN = 0.05
-
-        self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.05, 80)
-
-        if abs(self.ball_dir) < 10:
-            self.move_dir = self.ball_dir
-        elif abs(self.ball_dir) < MOVE_FORWARD_ANGLE:
-            self.move_dir = self.ball_dir * 3
-        elif self.ball_dist <= ORBIT_RADIUS:
-            distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
-            orbit_angle = 90 + distance_ratio * 90
-            self.move_dir = self.ball_dir + np.copysign(orbit_angle, self.ball_dir)
-        else:
-            self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS/self.ball_dist)), self.ball_dir)
+    
 
     def update_ball_info(self, ball_dir, ball_dist):
         self.see_ball = ball_dist != 0.0
-
         if self.see_ball:
             self.ball_dir = self.wrap_angle(ball_dir)
             self.ball_dist = ball_dist
-
             self.last_ball_dir = self.ball_dir
             self.last_ball_dist = self.ball_dist
-            
             self.last_ball_see_time = time.monotonic()
         elif time.monotonic() - self.last_ball_see_time < self.GIVE_UP_CHASING_BALL_TIME:
             self.ball_dir = self.last_ball_dir
@@ -193,7 +172,7 @@ class Robot:
             self.ball_dist = None
 
         # Possession
-        self.have_ball = self.see_ball and self.ball_dist < 55 and -15 < self.ball_dir < -5
+        self.have_ball = self.see_ball and self.ball_dist < 55 and -5 < self.ball_dir < 5
 
     def update_goal_info(
             self,
@@ -217,72 +196,78 @@ class Robot:
 
             self.goal_dir = self.wrap_angle(target_angle) if target_dist != 0 else None
             self.goal_ang_width = self.wrap_angle(goal_ang_width) if target_dist != 0 else None
-            self.goal_dist = self.approx_real_dist(target_dist) / 10 if target_dist != 0 else None
+            self.goal_dist = self.approx_real_dist(target_dist) if target_dist != 0 else None
             self.see_goal = self.goal_dir is not None and self.goal_dist is not None
+
             self.own_goal_dir = self.wrap_angle(own_angle) if own_dist != 0 else None
-            self.own_goal_dist = self.approx_real_dist(own_dist) / 10 if own_dist != 0 else None
+            self.own_goal_dist = self.approx_real_dist(own_dist) if own_dist != 0 else None
             self.own_goal_ang_width = self.wrap_angle(own_goal_ang_width) if target_dist != 0 else None
             self.see_own_goal = self.own_goal_dir is not None and self.own_goal_dist is not None
-
-            
 
     def update_stuff(self):
         # IMU
         self.bot_dir = -1 * self.wrap_angle(self.imu.get_yaw())
 
-        # Region
-        # if abs(self.pos_x) > 350:
-        #     if self.pos_y > 700:
-        #         self.region = RobotRegions.GOAL_SIDE
-        #     elif self.pos_y < -640:
-        #         self.region = RobotRegions.OWN_GOAL_SIDE
-        #     elif abs(self.pos_x):
-        #         self.region = RobotRegions.MIDDLE_SIDE
-        # elif self.pos_y < -640:
-        #     self.region = RobotRegions.OWN_GOAL
-        # elif self.pos_y < 1100:
-        #     self.region = RobotRegions.MIDDLE
-        # else:
-        #     self.region = RobotRegions.NONE
-
+        # Position
         self.pos_x, self.pos_y = self.loc.getPosition()
+
+        # Region
+        # https://www.desmos.com/calculator/bgx7brpv73
+        if abs(self.pos_x) > 450:
+            if self.pos_y > 700:
+                self.region = RobotRegions.GOAL_SIDE
+            elif self.pos_y < -640:
+                self.region = RobotRegions.OWN_GOAL_SIDE
+            else:
+                self.region = RobotRegions.MIDDLE_SIDE
+        elif self.pos_y < -640:
+            self.region = RobotRegions.OWN_GOAL
+        elif self.pos_y < 1100:
+            self.region = RobotRegions.MIDDLE
+        else:
+            self.region = RobotRegions.NONE
+
     
     # ----- Actions ----- #
     def move(self):
         # self.avoid_out_of_bounds()
         self.drive.move(self.move_dir, self.move_spd, self.rot_spd)
+
+        # DEBUG
         # self.drive.move(0, 0, self.rot_spd)
 
     def avoid_out_of_bounds(self):
         BOUND_LINE_X = 450 + 10     # mm, ±
         BOUND_LINE_Y = 650 + 10     # mm, ±
-        START_SLOWDOWN_X_DIST = 50
-        START_SLOWDOWN_Y_DIST = 50
-        AVOID_WALL_SPD = 0.01
+        START_SLOWDOWN_X_DIST = 50  # mm
+        START_SLOWDOWN_Y_DIST = 50  # mm
+        AVOID_WALL_SPD = 0.05       # speed to move away from wall when too close
 
         if self.move_dir is None or self.move_spd is None:
             return
 
-        x_dir = 1 if self.pos_x >= 0 else -1
-        y_dir = 1 if self.pos_y >= 0 else -1
+        side_x = np.sign(self.pos_x)
+        side_y = np.sign(self.pos_y)
 
         move_dir_absolute = self.to_absolute_dir(self.move_dir)
         move_vec_x = self.move_spd * math.sin(math.radians(move_dir_absolute))
         move_vec_y = self.move_spd * math.cos(math.radians(move_dir_absolute))
+        move_vec_x_dir = np.sign(move_vec_x)
+        move_vec_y_dir = np.sign(move_vec_y)
 
-        if abs(self.pos_x) > BOUND_LINE_X:
-            move_vec_x = -AVOID_WALL_SPD * x_dir
-        if abs(self.pos_y) > BOUND_LINE_Y:
-            move_vec_y = -AVOID_WALL_SPD * y_dir
+        if abs(self.pos_x) > BOUND_LINE_X and move_vec_x_dir == side_x:
+            move_vec_x = -AVOID_WALL_SPD * side_x
+        if abs(self.pos_y) > BOUND_LINE_Y and move_vec_y_dir == side_y:
+            move_vec_y = -AVOID_WALL_SPD * side_y
 
-        if abs(self.pos_x) > BOUND_LINE_X - START_SLOWDOWN_X_DIST and np.sign(move_vec_x) == x_dir:
-            distance_to_wall = BOUND_LINE_X - abs(self.pos_x)
-            scale = self.clamp(distance_to_wall / START_SLOWDOWN_X_DIST, 0.0, 1.0)
+        if abs(self.pos_x) > BOUND_LINE_X - START_SLOWDOWN_X_DIST and move_vec_x_dir == side_x:
+            distance_to_bound = BOUND_LINE_X - abs(self.pos_x)
+            scale = self.clamp(distance_to_bound / START_SLOWDOWN_X_DIST, 0.0, 1.0)
             move_vec_x *= scale
 
-        if abs(self.pos_y) > BOUND_LINE_Y - START_SLOWDOWN_Y_DIST and np.sign(move_vec_y) == y_dir:
-            distance_to_wall = BOUND_LINE_Y - abs(self.pos_y)
-            scale = self.clamp(distance_to_wall / START_SLOWDOWN_Y_DIST, 0.0, 1.0)
+        if abs(self.pos_y) > BOUND_LINE_Y - START_SLOWDOWN_Y_DIST and move_vec_y_dir == side_y:
+            distance_to_bound = BOUND_LINE_Y - abs(self.pos_y)
+            scale = self.clamp(distance_to_bound / START_SLOWDOWN_Y_DIST, 0.0, 1.0)
             move_vec_y *= scale
 
         final_speed = math.hypot(move_vec_x, move_vec_y)
@@ -290,10 +275,61 @@ class Robot:
             self.move_spd = 0
             self.move_dir = 0
             return
-
         final_angle = math.degrees(math.atan2(move_vec_x, move_vec_y))
         self.move_dir = self.to_relative_dir(self.wrap_angle(final_angle))
         self.move_spd = final_speed
+
+    def ball_capture(self):
+            MOVE_FORWARD_ANGLE = 45  # ±
+            ORBIT_RADIUS = 85
+            SPD_MAX = 0.25
+            SPD_MIN = 0.05
+    
+            self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.05, 80) # Smooth speed adjustment
+    
+            if abs(self.ball_dir) < 10: # Ball is basically forward, charge towards it
+                self.move_dir = self.ball_dir
+                self.move_spd = SPD_MAX
+            elif abs(self.ball_dir) < MOVE_FORWARD_ANGLE: # Ball is fairly forward, move in an exaggerated direction to it
+                self.move_dir = self.ball_dir * 3
+            elif self.ball_dist <= ORBIT_RADIUS: # Ball is too close, move away from it
+                distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
+                orbit_angle = 90 + distance_ratio * 90
+                self.move_dir = self.ball_dir + np.copysign(orbit_angle, self.ball_dir)
+            else: # Move in the tangential direction to a circle centered at the ball
+                self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS/self.ball_dist)), self.ball_dir)
+
+    def yaw_correct(self, target_angle=0.0, max_rot_spd=0.3, speed=1.0, kp=0.001, kd=0.00001, tolerance=2):
+        """PD Yaw correction"""
+
+        self.yaw_pd_controller.kp = kp
+        self.yaw_pd_controller.kd = kd
+
+        if self.bot_dir is None:
+            self.rot_spd = 0
+            return self.rot_spd
+
+        error = self.wrap_angle(target_angle - self.bot_dir)
+
+        if abs(error) < tolerance:
+            self.rot_spd = 0
+            self.yaw_error = error
+            self.yaw_error_time = time.monotonic()
+            self.yaw_pd_controller.reset()
+            return self.rot_spd
+
+        correction = self.yaw_pd_controller.compute(target_angle, self.bot_dir)
+        self.rot_spd = self.clamp(speed * correction, -abs(max_rot_spd), abs(max_rot_spd))
+        self.yaw_error = error
+        self.yaw_error_time = time.monotonic()
+        return self.rot_spd
+        
+    def rotate_about_dribbler(self, dir, speed=0.05):
+        """Input: dir = 1 for clockwise, 1 for anticlockwise"""
+        RATIO_CONSTANT = 1 # 1 happened to work
+        self.rot_spd = speed * dir
+        self.move_dir = -1 * np.sign(dir) * 90
+        self.move_spd = RATIO_CONSTANT * speed
 
     def kick(self):
         self.kicker.kick()
@@ -303,36 +339,6 @@ class Robot:
     
     def stop_dribbler(self):
         self.dribbler.set_speed(0)
-
-    def yaw_correct(self, target_angle=0.0, max_spd=0.3, speed=1.0, kp=0.001, kd=0.00001, tolerance=2):
-        """PD Yaw correction"""
-        if self.bot_dir is None:
-            self.rot_spd = 0
-            return
-
-        error = self.wrap_angle(target_angle - self.bot_dir)
-
-        if abs(error) < tolerance:
-            self.rot_spd = 0
-            self.yaw_error = error
-            self.yaw_error_time = time.monotonic()
-            return self.rot_spd
-
-        now = time.monotonic()
-        dt = now - self.yaw_error_time
-        derivative = (error - self.yaw_error) / dt if dt > 0 else 0
-        derivative = self.clamp(derivative, -100, 100)
-        correction = kp * error + kd * derivative
-        self.rot_spd = self.clamp(speed * correction, -abs(max_spd), abs(max_spd))
-        self.yaw_error = error
-        self.yaw_error_time = now
-        
-    def rotate_about_dribbler(self, dir, speed=0.05):
-        """Input: dir = 1 for clockwise, 1 for anticlockwise"""
-        RATIO_CONSTANT = 1 # 1 happened to work
-        self.rot_spd = speed * dir
-        self.move_dir = -1 * np.sign(dir) * 90
-        self.move_spd = RATIO_CONSTANT * speed
 
     # ----- Helper functions ----- #
 
@@ -362,16 +368,17 @@ class Robot:
         return self.wrap_angle(absolute_dir - self.bot_dir)
 
     @staticmethod
-    def clamp(value, mn, mx):
-            return max(mn, min(value, mx))
+    def clamp(n, minn, maxn):
+            return max(minn, min(n, maxn))
 
     @staticmethod
     def approx_real_dist(pixel_dist):
         """Input: Distance from centre of camera in pixels
         Output: pproximate real distance in mm"""
+         # Please don't change this function because so many constants are based on this
         # https://www.desmos.com/calculator/gkbgcxzhoo
 
-        # Please don't change this because so many constants are based on this
+       
         if pixel_dist is None or pixel_dist == 0.0:
             return None
         approx_real_dist_cm = 10**((pixel_dist + 75)/165)
