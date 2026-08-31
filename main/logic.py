@@ -16,11 +16,13 @@ import math
 import board
 from enum import Enum
 
+ROBOT_ROLE_IS_ATTACK = True # False for defence
+
 SOLENOID_PIN = board.D21
 PULSE_S = 0.02
 
 # -----------------------------------------------------------------------------------------------------------
-class RobotRegions(Enum):
+class RobotRegions(Enum): # Classifications for where the robot is in the field to decide behaviour
     NONE = 0
     GOAL_SIDE = 1
     MIDDLE = 2
@@ -45,20 +47,20 @@ class Robot:
         self.see_ball = False
         self.have_ball = False
         self.ball_dir = None
-        self.ball_dist = None
+        self.ball_dist = None # mm
         self.last_ball_dir = None
-        self.last_ball_dist = None
+        self.last_ball_dist = None # mm
         self.last_ball_see_time = 0
-        self.GIVE_UP_CHASING_BALL_TIME = 0.5
+        self.GIVE_UP_CHASING_BALL_TIME = 0.5 # Even if Vision.py lost track of ball, if ball was last seen before this time, bot will consider the last seen direction as ball dir
 
         # Goal
-        self.TARGET_GOAL_IS_BLUE = True
+        self.TARGET_GOAL_IS_BLUE = True # False for yellow goal
         self.see_goal = False
         self.goal_dir = None
-        self.goal_dist = None
+        self.goal_dist = None # mm
         self.see_own_goal = False
         self.own_goal_dir = None
-        self.own_goal_dist = None
+        self.own_goal_dist = None # mm
 
         # Movement
         self.move_spd = 0
@@ -75,38 +77,48 @@ class Robot:
         
     
     def main_loop(self):
-        self.update_stuff()
+        # Update sensor data
+        self.update_stuff() 
 
-        self.attack_loop()
-        # self.defence_loop()
+        # Update movement data using sensor data
+        if ROBOT_ROLE_IS_ATTACK: 
+            self.attack_loop()
+        else:
+            self.defence_loop()
 
+        # Execute movement
         self.move()
 
         # DEBUG
-        print(self.ball_dir, self.ball_dist, self.have_ball)
+        # print(self.ball_dir, self.ball_dist, self.have_ball)
         # print(self.goal_dir, self.goal_ang_width, self.goal_dist)
         # print(self.own_goal_dir, self.own_goal_dist)
         
     
     def attack_loop(self):
-        if not self.have_ball:
+        # Yaw correct towards goal
+        if not self.have_ball and self.see_ball:
             if self.see_goal:
                 angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.25
                 self.yaw_correct(self.to_absolute_dir(angle))
 
+        # Possession behaviour
         if self.have_ball:
             self.kick()
-            pass
+
+        # Ball chase behaviour
         elif self.see_ball:
             self.ball_capture()
+
+        # Can't see ball
         else:
             self.move_spd = 0
             self.move_dir = 0
             self.stop_dribbler()
 
     def defence_loop(self):
-        KEEP_DIST = 400
-        TOLERANCE = 30
+        KEEP_DIST = 400 # mm
+        TOLERANCE = 30 # mm
         GOAL_WEIGHT = 0.1
         BALL_WEIGHT = 1.0
         SPD_MAX = 0.3
@@ -131,20 +143,21 @@ class Robot:
             abs_ball_dir = self.to_absolute_dir(self.ball_dir)
             diff = self.wrap_angle(abs_goal_dir - abs_ball_dir)
             move_dir_ball = self.to_absolute_dir(np.sign(diff) * 90) # Move either left or right
+            # move_dir_ball = self.to_absolute_dir((abs_goal_dir + abs_ball_dir)/2)
 
             self.yaw_correct(self.to_absolute_dir(self.ball_dir))
         else:
-            self.yaw_correct(self.to_absolute_dir(self.own_goal_dir) + 180, tolerance=10)
-
             # No ball to block, just maintain constant distance with goal
             if move_dir_goal == 0:
                 self.move_spd = 0
             else:
                 self.move_spd = 0.03
                 self.move_dir = move_dir_goal
+
+            self.yaw_correct(self.to_absolute_dir(self.own_goal_dir) + 180, tolerance=10) # Face opposite of goal dir
             return
 
-        # Add weighted vectors (blocking ball is given much more weight than keeping distance)
+        # Add weighted vectors (blocking ball is given more weight than keeping distance with goal)
         goal_angle = math.radians(self.to_absolute_dir(move_dir_goal))
         ball_angle = math.radians(move_dir_ball)
         move_vec_x = GOAL_WEIGHT * math.sin(goal_angle) + BALL_WEIGHT * math.sin(ball_angle)
@@ -153,7 +166,6 @@ class Robot:
 
         move_angle = math.degrees(math.atan2(move_vec_x, move_vec_y))
         self.move_dir = self.to_relative_dir(move_angle)
-
     
 
     def update_ball_info(self, ball_dir, ball_dist):
@@ -324,12 +336,13 @@ class Robot:
         self.yaw_error_time = time.monotonic()
         return self.rot_spd
         
-    def rotate_about_dribbler(self, dir, speed=0.05):
-        """Input: dir = 1 for clockwise, 1 for anticlockwise"""
-        RATIO_CONSTANT = 1 # 1 happened to work
+    def rotate_about_dribbler(self, dir, ratio=1.0, speed=0.05):
+        """Input: dir = 1 for clockwise, 1 for anticlockwise
+           ratio≈1 to rotate about dribbler, ratio=0 to rotate on the spot"""
+        
         self.rot_spd = speed * dir
-        self.move_dir = -1 * np.sign(dir) * 90
-        self.move_spd = RATIO_CONSTANT * speed
+        self.move_dir = ratio * np.sign(dir) * 90
+        self.move_spd = ratio * speed
 
     def kick(self):
         self.kicker.kick()
@@ -341,13 +354,12 @@ class Robot:
         self.dribbler.set_speed(0)
 
     # ----- Helper functions ----- #
-
     @staticmethod
     def wrap_angle(theta):
-            """Returns same angle but in [-180°,180°)"""
-            if theta is None:
-                return None
-            return (theta + 180) % 360 - 180
+        """Returns same angle but in [-180°,180°)"""
+        if theta is None:
+            return None
+        return (theta + 180) % 360 - 180
 
     @staticmethod
     def sigmoid(value, min=0, max=1, steepness=0.1, centre=0):
@@ -374,10 +386,9 @@ class Robot:
     @staticmethod
     def approx_real_dist(pixel_dist):
         """Input: Distance from centre of camera in pixels
-        Output: pproximate real distance in mm"""
+        Output: approximate real distance in mm"""
          # Please don't change this function because so many constants are based on this
         # https://www.desmos.com/calculator/gkbgcxzhoo
-
        
         if pixel_dist is None or pixel_dist == 0.0:
             return None
