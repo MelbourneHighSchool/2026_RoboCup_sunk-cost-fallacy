@@ -32,13 +32,12 @@ class RobotRegions(Enum): # Classifications for where the robot is in the field 
 
 class Robot:
     def __init__(self, drive=None, imu=None, config=None):
-
+        # Initialise hardware
         self.config = config if config is not None else Config()
         self.imu = imu if imu is not None else IMU()
         self.imu.calibrate_yaw()
         self.drive = drive if drive is not None else Drive.from_config(self.config)
         self.yaw_pd_controller = PDController(kp=0.001, kd=0.00001)
-
         self.kicker = Kicker(SOLENOID_PIN, PULSE_S)
         self.dribbler = Dribbler(self.config)
         self.tofs = (ToF(0x50), ToF(0x51), ToF(0x52), ToF(0x53), ToF(0x54), ToF(0x55), ToF(0x56), ToF(0x5f))
@@ -51,7 +50,7 @@ class Robot:
         self.last_ball_dir = None
         self.last_ball_dist = None # mm
         self.last_ball_see_time = 0
-        self.GIVE_UP_CHASING_BALL_TIME = 0.5 # Even if Vision.py lost track of ball, if ball was last seen before this time, bot will consider the last seen direction as ball dir
+        self.GIVE_UP_CHASING_BALL_TIME = 0.5 # Even if Vision.py lost track of ball, if ball was last seen before this time, robot will use the last seen data
 
         # Goal
         self.TARGET_GOAL_IS_BLUE = True # False for yellow goal
@@ -96,21 +95,22 @@ class Robot:
         
     
     def attack_loop(self):
-        # Yaw correct towards goal
+        # See ball but don't have it
         if not self.have_ball and self.see_ball:
+            # Yaw correct towards the goal
             if self.see_goal:
                 angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.25
                 self.yaw_correct(self.to_absolute_dir(angle))
 
-        # Possession behaviour
+        # Have the ball
         if self.have_ball:
             self.kick()
 
-        # Ball chase behaviour
+        # See the ball
         elif self.see_ball:
             self.ball_capture()
 
-        # Can't see ball
+        # Don't see ball
         else:
             self.move_spd = 0
             self.move_dir = 0
@@ -169,13 +169,14 @@ class Robot:
     
 
     def update_ball_info(self, ball_dir, ball_dist):
-        self.see_ball = ball_dist != 0.0
+        self.see_ball = ball_dist != 0.0 # Vision gives distance=0 when no ball seen
         if self.see_ball:
             self.ball_dir = self.wrap_angle(ball_dir)
             self.ball_dist = ball_dist
-            self.last_ball_dir = self.ball_dir
+            self.last_ball_dir = self.ball_dir # Store ball data in another variable to use later if sight of ball briefly lost
             self.last_ball_dist = self.ball_dist
             self.last_ball_see_time = time.monotonic()
+        # If lost sight of ball recently, use data from when it was last seen
         elif time.monotonic() - self.last_ball_see_time < self.GIVE_UP_CHASING_BALL_TIME:
             self.ball_dir = self.last_ball_dir
             self.ball_dist = self.last_ball_dist
@@ -184,7 +185,7 @@ class Robot:
             self.ball_dist = None
 
         # Possession
-        self.have_ball = self.see_ball and self.ball_dist < 55 and -5 < self.ball_dir < 5
+        self.have_ball = self.see_ball and 40 < self.ball_dist < 55 and -5 < self.ball_dir < 5
 
     def update_goal_info(
             self,
@@ -194,12 +195,14 @@ class Robot:
             ygoal_angle,
             ygoal_ang_width,
             ygoal_dist,
-    ):
+    ):      
+            # Blue goal is target, yellow goal is own goal
             if self.TARGET_GOAL_IS_BLUE:
                 target_angle, target_dist = bgoal_angle, bgoal_dist
                 own_angle, own_dist = ygoal_angle, ygoal_dist
                 goal_ang_width = bgoal_ang_width
                 own_goal_ang_width = ygoal_ang_width
+            # Yellow goal is target, blue goal is own goal
             else:
                 target_angle, target_dist = ygoal_angle, ygoal_dist
                 own_angle, own_dist = bgoal_angle, bgoal_dist
@@ -220,7 +223,7 @@ class Robot:
         # IMU
         self.bot_dir = -1 * self.wrap_angle(self.imu.get_yaw())
 
-        # Position
+        # Localisation
         self.pos_x, self.pos_y = self.loc.getPosition()
 
         # Region
@@ -341,7 +344,7 @@ class Robot:
            ratio≈1 to rotate about dribbler, ratio=0 to rotate on the spot"""
         
         self.rot_spd = speed * dir
-        self.move_dir = ratio * np.sign(dir) * 90
+        self.move_dir = np.sign(dir) * 90
         self.move_spd = ratio * speed
 
     def kick(self):
@@ -363,30 +366,34 @@ class Robot:
 
     @staticmethod
     def sigmoid(value, min=0, max=1, steepness=0.1, centre=0):
-            # https://www.desmos.com/calculator/jkqwos4tzh
-            a = math.exp(steepness * (centre - value))
-            return (max - min) * (1 / (1 + a)) + min
+        # https://www.desmos.com/calculator/jkqwos4tzh
+        a = math.exp(steepness * (centre - value))
+        return (max - min) * (1 / (1 + a)) + min
 
     def to_absolute_dir(self, relative_dir):
-            """Input a direction relative to the bot orientation\nReturns a direction that ignores bot orientation"""
-            if relative_dir is None:
-                return None
-            return self.wrap_angle(relative_dir + self.bot_dir)
+        """Input: direction relative to the robot
+           Output: direction relative to the field"""
+
+
+        if relative_dir is None:
+            return None
+        return self.wrap_angle(relative_dir + self.bot_dir)
     
     def to_relative_dir(self, absolute_dir):
-        """Input a direction that ignores bot orientation\nReturns a direction relative to the bot orientation"""
+        """Input: direction relative to the field
+           Output: direction relative to the robot"""
         if absolute_dir is None:
             return None
         return self.wrap_angle(absolute_dir - self.bot_dir)
 
     @staticmethod
     def clamp(n, minn, maxn):
-            return max(minn, min(n, maxn))
+        return max(minn, min(n, maxn))
 
     @staticmethod
     def approx_real_dist(pixel_dist):
         """Input: Distance from centre of camera in pixels
-        Output: approximate real distance in mm"""
+           Output: approximate real distance in mm"""
          # Please don't change this function because so many constants are based on this
         # https://www.desmos.com/calculator/gkbgcxzhoo
        
@@ -406,6 +413,7 @@ SEND_FRAME = True
 server = WSServer()
 server.run()
 
+# Start vision instance
 vision = Vision()
 vision.start()
 R = min(vision.camera.size) / 2
@@ -456,7 +464,7 @@ while True:
             # Send frame
             server.send_frame(frame)
         
-        # Update robot stuff
+        # Update vision data
         robot.update_ball_info(bangle, bdist)
         robot.update_goal_info(
             bgoal_angle,
@@ -472,6 +480,7 @@ while True:
     except KeyboardInterrupt:
         break
 
+# Exit
 vision.deinit()
 robot.drive.stop()
 robot.stop_dribbler()
