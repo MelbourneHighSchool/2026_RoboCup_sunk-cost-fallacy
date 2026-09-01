@@ -102,14 +102,14 @@ match mode:
     case 0:
         match res:
             case 1:
-                from _test_files import test_cam
+                from test_files import test_cam
                 test_cam.main(config)
     case 1:
         ...
     case 2:
         match res:
             case 0:
-                from _test_files import cal_cam
+                from test_files import cal_cam
                 cal_cam.main(config)
                 
             case 1:
