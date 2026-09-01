@@ -18,7 +18,10 @@ class Localizer:
     def __init__(self, tofs:list[ToF], imu:IMU):
         self._alive = True
         self.tofs = tofs
+        for i, tof in enumerate(self.tofs):
+            tof.callback = self.updateFunctionGenerator(i)
         self.imu = imu
+        self.imu.yawCallback = self.updateFunctionGenerator(8) 
         self.cppModule = subprocess.Popen(
             ["lib/localizeFast"], #decide filetype later
             stdin=subprocess.PIPE,
@@ -29,31 +32,18 @@ class Localizer:
         self.cppIOLock = threading.Lock()
         self.readerThread = threading.Thread(target=self._tofUpdator, daemon=True)
         self.readerThread.start()
+    def updateFunctionGenerator(self, i):
+        return lambda dist: self.updateReading(i, dist)
+    def updateReading(self, index, value):
+        with self.cppIOLock:
+            self.cppModule.stdin.write(f"i {index} {value}\n")
+            self.cppModule.stdin.flush()
+            
     def kill(self):
         "Murder is bad, idk why you'd want to do this"
-        self._alive = False
         with self.cppIOLock:
             self.cppModule.stdin.write("e\n")
             self.cppModule.stdin.flush()
-
-    def _tofUpdator(self):
-        # integrate imu and tof update loops with this update loop for less latency?
-        readings = [2000] * 8
-        while self._alive:
-            instruction = "i "
-            for i, tof in enumerate(self.tofs):
-                reading = tof.read()
-                if reading:
-                    readings[i] = reading + 40
-            #TODO
-            instruction += " ".join(map(str, readings)) + " "
-            instruction += str(radians(self.imu.get_yaw())) + "\n"
-            with self.cppIOLock:
-                self.cppModule.stdin.write(instruction)
-                self.cppModule.stdin.flush()
-                # print("===========================\n\nYo guys we wrote B)\n\n======================")
-            #sync with update cycle maybe idk
-            sleep(0.01)
 
     def getPosition(self):
         with self.cppIOLock:

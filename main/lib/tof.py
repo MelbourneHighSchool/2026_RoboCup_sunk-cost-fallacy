@@ -14,7 +14,7 @@ from lib.i2c_bus import I2C_LOCK
 
 
 class ToF:
-    def __init__(self, address=0x50, bus_number=1, poll_interval=0.02):
+    def __init__(self, address=0x50, bus_number=1, poll_interval=0.02, callback=lambda distance:None):
         self._address = address
         self._poll_interval = poll_interval
         self._lock = threading.Lock()
@@ -22,7 +22,7 @@ class ToF:
         self._last_sequence = None
         self._latest_distance = None
         self._bus = SMBus(bus_number)
-
+        self.callback = callback
         self._thread = threading.Thread(target=self._update_loop, daemon=True)
         self._thread.start()
 
@@ -46,6 +46,7 @@ class ToF:
                 sequence, distance = self._read_next_measurement()
                 if distance is None:
                     continue
+                self.callback(distance)
                 with self._lock:
                     self._latest_distance = distance
             except Exception:
