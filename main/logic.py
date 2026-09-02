@@ -18,11 +18,12 @@ from enum import Enum
 
 ROBOT_ROLE_IS_ATTACK = True # False for defence
 
+# Kicker
 SOLENOID_PIN = board.D21
 PULSE_S = 0.02
 
 # -----------------------------------------------------------------------------------------------------------
-class RobotRegions(Enum): # Classifications for where the robot is in the field to decide behaviour
+class RobotRegions(Enum): # Classifications for where the robot is in the field (used to decide behaviour)
     NONE = 0
     GOAL_SIDE = 1
     MIDDLE = 2
@@ -43,14 +44,14 @@ class Robot:
         self.tofs = (ToF(0x50), ToF(0x51), ToF(0x52), ToF(0x53), ToF(0x54), ToF(0x55), ToF(0x56), ToF(0x5f))
 
         # Ball
-        self.see_ball = False
+        self.see_sball = False
         self.have_ball = False
         self.ball_dir = None
         self.ball_dist = None # mm
         self.last_ball_dir = None
         self.last_ball_dist = None # mm
         self.last_ball_see_time = 0
-        self.GIVE_UP_CHASING_BALL_TIME = 0.5 # Even if Vision.py lost track of ball, if ball was last seen before this time, robot will use the last seen data
+        self.GIVE_UP_CHASING_BALL_TIME = 0.5 # Even if Vision.py loses track of ball, if ball was last seen before this time, robot will use the last seen data
 
         # Goal
         self.TARGET_GOAL_IS_BLUE = True # False for yellow goal
@@ -344,7 +345,7 @@ class Robot:
            ratio≈1 to rotate about dribbler, ratio=0 to rotate on the spot"""
         
         self.rot_spd = speed * dir
-        self.move_dir = np.sign(dir) * 90
+        self.move_dir = np.sign(dir) * 90 # Strafe left or right
         self.move_spd = ratio * speed
 
     def kick(self):
@@ -355,6 +356,15 @@ class Robot:
     
     def stop_dribbler(self):
         self.dribbler.set_speed(0)
+
+    def estimate_obj_coordinates(self, obj_dir, obj_dist):
+        """Input: direction of object RELATIVE TO THE ROBOT, distance to object from robot
+           Output: Estimated coordinates of object"""
+
+        abs_obj_dir = self.to_absolute_dir(obj_dir)
+        obj_pos_x = self.pos_x + obj_dist * math.sin(math.radians(abs_obj_dir))
+        obj_pos_y = self.pos_y + obj_dist * math.cos(math.radians(abs_obj_dir))
+        return obj_pos_x, obj_pos_y
 
     # ----- Helper functions ----- #
     @staticmethod
@@ -373,7 +383,6 @@ class Robot:
     def to_absolute_dir(self, relative_dir):
         """Input: direction relative to the robot
            Output: direction relative to the field"""
-
 
         if relative_dir is None:
             return None
@@ -426,6 +435,7 @@ default_font = (cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 5, cv2.LINE_AA)
 padx = 15
 pady = 25
 line_spacing = 30
+x=  5
 
 while True:
     try:
