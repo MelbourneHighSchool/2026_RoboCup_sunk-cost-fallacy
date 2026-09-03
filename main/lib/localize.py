@@ -30,8 +30,6 @@ class Localizer:
             bufsize=1
         )
         self.cppIOLock = threading.Lock()
-        self.readerThread = threading.Thread(target=self._tofUpdator, daemon=True)
-        self.readerThread.start()
     def updateFunctionGenerator(self, i):
         return lambda dist: self.updateReading(i, dist)
     def updateReading(self, index, value):
@@ -49,7 +47,9 @@ class Localizer:
         with self.cppIOLock:
             self.cppModule.stdin.write("o\n")
             self.cppModule.stdin.flush()
-        output = (self.cppModule.stdout.readline(), self.cppModule.stdout.readline()), self.cppModule.stdout.readline(), self.cppModule.stdout.readline()
+        output = (self.cppModule.stdout.readline(), self.cppModule.stdout.readline()),\
+            self.cppModule.stdout.readline(), self.cppModule.stdout.readline(),\
+            self.cppModule.stdout.readline()
         # print(output)
         x, y = output[0]
         x = float(x[:-1])

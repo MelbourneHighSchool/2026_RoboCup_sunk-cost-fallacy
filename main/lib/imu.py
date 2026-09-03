@@ -66,7 +66,9 @@ class IMU:
     #         return self._latest_quaternion
 
     def calibrate_yaw(self):
-        self.wait_first(5)
+        wait_success = self.wait_first(5)
+        if not wait_success:
+            print("\n\n\n\nRUH ROH imu is not getting any readings. . . . . . .\n\n\n\n")
         with self._lock:
             self.yaw_offset = self._latest_yaw
 
