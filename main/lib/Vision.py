@@ -25,6 +25,7 @@ class Vision:
         self.camera = Camera()
         self.broadcaster = Broadcaster(self.camera.create_broadcaster_args())
 
+        self.center_v = self.camera.v_center
         self.ball_proc_setup()
         self.goal_proc_setup()
 
@@ -76,7 +77,7 @@ class Vision:
         "Note: May sometimes trigger without waiting for the next frame"
         with self.camera.c_new_frame:
             self.camera.c_new_frame.wait(timeout=timeout)
-    
+
     # Ball proc
     def ball_proc_setup(self):
         self.ball_bounds_v = Array(c_uint8, (0, 120, 160, 30, 255, 255))  # (lboundH, S, V, uboundH, S, V) - change defaults later!

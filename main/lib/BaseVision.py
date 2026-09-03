@@ -14,12 +14,13 @@ import traceback
 
 from multiprocessing.synchronize import Condition as Condition_T, Event as Event_T
 from multiprocessing.sharedctypes import Synchronized as Synchronized_T
-from ctypes import c_uint8, c_float, c_bool
+from ctypes import c_uint8, c_float, c_bool, c_int16
 from typing import Callable, Any, NamedTuple
 
 class BroadcasterArgs(NamedTuple):
     size: tuple[int, int]
     shm_name: str
+    v_center: Synchronized_T  # Array of c_int16
     v_latest_idx: Synchronized_T  #[c_uint8]
     v_latest_timestamp: Synchronized_T  #[c_float]
     c_new_frame: Condition_T
@@ -29,6 +30,7 @@ class BroadcasterArgs(NamedTuple):
 class BaseProcArgs(NamedTuple):
     frame_size: int
     frame_shape: tuple[int, int, int]
+    center: tuple[int, int]
     latest_idx: int
     latest_timestamp: float
     frame: cv2.Mat
@@ -48,7 +50,7 @@ class Camera:
         self.shm_name = shm_name
         self.frame_size = size[0] * size[1] * 3
         self.frame_shape = (size[1], size[0], 3)  # Rows, Columns, Components!!!
-        self.center = np.array([size[0]>>1, size[1]>>1], dtype=np.int16)
+        self.v_center = Array(c_int16, [size[0]>>1, size[1]>>1])
 
         # Initialise camera for low latency
         self.camera = picamera2.Picamera2()
@@ -88,6 +90,7 @@ class Camera:
         return BroadcasterArgs(
             self.size,
             self.shm_name,
+            self.v_center,
             self.v_latest_idx,
             self.v_latest_timestamp,
             self.c_new_frame,
@@ -260,6 +263,7 @@ class Broadcaster:
             # Unpack broadcaster_args and make useful vars
             size = self.broadcaster_args.size
             shm_name = self.broadcaster_args.shm_name
+            v_center = self.broadcaster_args.v_center
             v_latest_idx = self.broadcaster_args.v_latest_idx
             v_latest_timestamp = self.broadcaster_args.v_latest_timestamp
             c_new_frame = self.broadcaster_args.c_new_frame
@@ -298,7 +302,8 @@ class Broadcaster:
                 if not res: # Timeout
                     exit_circumstance = 1
                     break
-                
+
+                with v_center.get_lock():           center = tuple(v_center)
                 with v_latest_timestamp.get_lock(): latest_timestamp = v_latest_timestamp.value
                 with v_latest_idx.get_lock():       latest_idx = v_latest_idx.value
 
@@ -311,6 +316,7 @@ class Broadcaster:
                 base_args = BaseProcArgs(
                     frame_size,
                     frame_shape,
+                    center,
                     latest_idx,
                     latest_timestamp,
                     frame,
@@ -357,7 +363,7 @@ class Broadcaster:
         return (v_config, v_ok)  # Return it so proc_base saves it and feeds it to the loop
     
     def proc_example_loop(self, base_args, keep_args):
-        frame_size, frame_shape, latest_idx, latest_timestamp, frame, enabled = base_args  # Unpack base_args
+        frame_size, frame_shape, center, latest_idx, latest_timestamp, frame, enabled = base_args  # Unpack base_args
         if not enabled:
             return  # In loop, return something evaluating to False to end (the current iteration) and not raise an error
                     # See "Print exit msg" comment to see what other return values mean

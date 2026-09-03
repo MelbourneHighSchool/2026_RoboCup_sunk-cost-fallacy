@@ -39,6 +39,7 @@ class IMU:
     def _update_loop(self):
         while self._running:
             try:
+                # Use game quat rather than normal quat because normal quat considers magnetometer reading, which lwk makes it worse
                 quat_i, quat_j, quat_k, quat_real = self._bno.game_quaternion
                 accel_x, accel_y, accel_z = self._bno.acceleration
                 yaw = self._quaternion_to_yaw_degrees(quat_i, quat_j, quat_k, quat_real)
