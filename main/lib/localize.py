@@ -33,12 +33,14 @@ class Localizer:
         self.readerThread = threading.Thread(target=self._tofUpdator, daemon=True)
         self.readerThread.start()
     def updateFunctionGenerator(self, i):
+        "Generates update function to assign to callback"
         return lambda dist: self.updateReading(i, dist)
     def updateReading(self, index, value):
+        "Updates reading from sensor i with value value"
         with self.cppIOLock:
             self.cppModule.stdin.write(f"i {index} {value}\n")
             self.cppModule.stdin.flush()
-            
+
     def kill(self):
         "Murder is bad, idk why you'd want to do this"
         with self.cppIOLock:

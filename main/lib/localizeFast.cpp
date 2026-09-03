@@ -61,7 +61,9 @@ float bestX, bestY, bestAngle;
 float guessX, guessY, guessAngle;
 char action;
 
+/// @brief Function for daemon localization thread. do you spell localization with s or z? idk.
 void localiseLoop(){
+    //initialise stuff
     guessX = 230; guessY = -310; 
     bestX = guessX; bestY = guessY;
     inlock.lock();
@@ -73,17 +75,21 @@ void localiseLoop(){
     error = 0;
     lowestErr = error;
     while (true){
+        //modify guess position randomly
         temperature = error/30;
         guessAngle = targetAngle;
         guessX = clamp(guessX + (rndNorm() * temperature),-fieldRW + 105, fieldRW - 105);
         guessY = clamp(guessY + (rndNorm() * temperature),-fieldRH + 105, fieldRH - 105);
+        //simulate sensor measurements for this position
         estDistances(&guessX, &guessY, &guessAngle, dists.begin());
+        //calculate difference between actual measurements and these measurements
         inlock.lock();
         error = 0;//min(min(guessAngle - targetAngle + (float)(2*M_PI),targetAngle - guessAngle + (float)(2*M_PI)),abs(targetAngle-guessAngle));
         for (int j = 0; j < 8; j++){
             error += abs(max(targetDists[j]-dists[j],-100.0f));
         }
         inlock.unlock();
+        //if this position has lower error then stored position, update stored position
         if (error < lowestErr){
             lowestErr = error;
             outlock.lock();
@@ -102,9 +108,10 @@ array<queue<float>,8> prevDists;
 array<float,8> avgPrevDists;
 const int numSmoothingMeasurements = 8;
 float merr;
-int tIdx, tDist;
+int tIdx;
+float tValue;
 int main(){
-    //handles io
+    //main loop handles io. boring, don't want to annotate
     targetAngle = 0;
     for (int i = 0; i < 8; i++){
         targetDists[i] = 0;
@@ -116,23 +123,26 @@ int main(){
     cin.tie(nullptr);
     ios_base::sync_with_stdio(false);
     thread t(localiseLoop);
-    t.detach(); //if it breaks its because of this line i think probably
+    t.detach(); 
     while (true){
         cin >> action;
         if (action == 'i'){
-            cin >> tIdx;
+            cin >> tIdx >> tValue;
+            if (cin.bad()){
+                cerr << "bad input\n";
+                cin.clear();
+                continue;
+            }
             inlock.lock();
             if (tIdx == 8){
-                cin >> targetAngle;
-                bestAngle = targetAngle;
+                targetAngle = tValue;
             } else {
-                cin >> tDist;
-                if (abs(((numSmoothingMeasurements*tDist)/avgPrevDists[tIdx]) - 1) <0.35){
-                    targetDists[tIdx] = tDist;
+                if (abs(((numSmoothingMeasurements*tValue)/avgPrevDists[tIdx]) - 1) <0.35){
+                    targetDists[tIdx] = tValue;
                 }
-                avgPrevDists[tIdx] += tDist;
+                avgPrevDists[tIdx] += tValue;
                 avgPrevDists[tIdx] -= prevDists[tIdx].front();
-                prevDists[tIdx].push(tDist);
+                prevDists[tIdx].push(tValue);
                 prevDists[tIdx].pop();
             } 
             inlock.unlock();
@@ -159,7 +169,7 @@ int main(){
         } else if (action == 'e'){
             return 0;
         } else {
-            cerr << "invalid action\n";
+            cerr << "bad input\n";
         }
     }
 }
