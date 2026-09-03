@@ -17,9 +17,6 @@ import numpy as np
 import struct
 import time
 
-OFFSET_X = -20
-OFFSET_Y = 55
-
 class Vision:
     def __init__(self):
         self.camera = Camera()
@@ -106,7 +103,7 @@ class Vision:
         if not enabled:
             return
         
-        frame_size, frame_shape, latest_idx, latest_timestamp, frame = base_args[:5]
+        frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:6]
         ball_bounds_v, ball_info_v, mask_frame = keep_args
 
         # Find ball
@@ -133,7 +130,7 @@ class Vision:
 
         # HI BAO WHY ARE Y AND X SWAPPED TS MAKES 0 SENSE 😭😭😭
         
-        center = np.array((frame_shape[1] // 2 + OFFSET_X, frame_shape[0] // 2 + OFFSET_Y), dtype=np.int16)
+        center = np.array(center, dtype=np.int16)
         img_x, img_y = pixel_pos
         translated_pixel_pos = pixel_pos - center
         distance = min(32767, int(np.sqrt(sum(np.square(translated_pixel_pos)))))
@@ -179,7 +176,7 @@ class Vision:
         if not enabled:
             return
         
-        frame_size, frame_shape, latest_idx, latest_timestamp, frame = base_args[:5]
+        frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:5]
         goal_mask_frame, values = keep_args  # also unpack hsv_frame from here if using
         goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v = values
         
@@ -205,8 +202,8 @@ class Vision:
 
             (goal_center_x, goal_center_y), (goal_width, goal_height), rect_angle = rect
 
-            center_x = frame_shape[1] // 2 + OFFSET_X
-            center_y = frame_shape[0] // 2 + OFFSET_Y
+            center_x = center[0]
+            center_y = center[1]
             relative_x = goal_center_x - center_x
             relative_y = goal_center_y - center_y
 
