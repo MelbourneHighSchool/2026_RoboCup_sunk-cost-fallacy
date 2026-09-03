@@ -55,7 +55,7 @@ def main(config):
         frame = vision.camera.latest_frame
         center = (frame.shape[1] // 2 - 20, frame.shape[0] // 2 + 55)
 
-        raw_angle, distance, x, y, w, h, rot = vision.bgoal_info_v
+        raw_angle, ang_width, distance, x, y, w, h, rot = vision.bgoal_info
         angle = -(raw_angle * 180 / 32767 + 90) % 360
         frame = cv2.line(frame, (center[0], center[1]), (x, y), (50, 50, 255), 2, cv2.LINE_AA)
         frame = cv2.rectangle(frame, cv2.RotatedRect((float(x), float(y)), (float(w), float(h)), float(rot)).boundingRect(), (50, 50, 255), 2, cv2.LINE_AA)
@@ -77,7 +77,7 @@ def main(config):
         frame = vision.camera.latest_frame
         center = (frame.shape[1] // 2 - 20, frame.shape[0] // 2 + 55)
 
-        raw_angle, distance, x, y, w, h, rot = vision.ygoal_info_v
+        raw_angle, ang_width, distance, x, y, w, h, rot = vision.ygoal_info
         angle = -(raw_angle * 180 / 32767 + 90) % 360
         frame = cv2.line(frame, (center[0], center[1]), (x, y), (50, 50, 255), 2, cv2.LINE_AA)
         frame = cv2.rectangle(frame, cv2.RotatedRect((float(x), float(y)), (float(w), float(h)), float(rot)).boundingRect(), (50, 50, 255), 2, cv2.LINE_AA)

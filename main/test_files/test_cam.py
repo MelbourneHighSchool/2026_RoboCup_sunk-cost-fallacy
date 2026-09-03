@@ -28,7 +28,7 @@ def main(config):
             frame = cv2.circle(frame, (b_x, b_y), b_r, (50, 100, 255), 2, cv2.LINE_AA)
 
             # Draw blue goal
-            bg_raw_angle, bg_dist, bg_x, bg_y, bg_w, bg_h, bg_rot = vision.bgoal_info_v
+            bg_raw_angle, bg_ang_width, bg_dist, bg_x, bg_y, bg_w, bg_h, bg_rot = vision.bgoal_info_v
             bg_angle = -(bg_raw_angle * 180 / 32767 + 90) % 360
 
             frame = cv2.line(frame, (center[0], center[1]), (bg_x, bg_y), (255, 100, 50), 2, cv2.LINE_AA)
@@ -36,7 +36,7 @@ def main(config):
             frame = cv2.drawContours(frame, [bg_points], 0, (255, 100, 50), 2, cv2.LINE_AA)
 
             # Draw yellow goal
-            yg_raw_angle, yg_dist, yg_x, yg_y, yg_w, yg_h, yg_rot = vision.ygoal_info_v
+            yg_raw_angle, yg_ang_width, yg_dist, yg_x, yg_y, yg_w, yg_h, yg_rot = vision.ygoal_info_v
             yg_angle = -(yg_raw_angle * 180 / 32767 + 90) % 360
 
             frame = cv2.line(frame, (center[0], center[1]), (yg_x, yg_y), (50, 255, 255), 2, cv2.LINE_AA)
