@@ -1,3 +1,7 @@
+# Powerful brushless motor driver port
+# Motor driver it originates from: https://oshwlab.com/andrewchen3128/bldc-driver-2-v4
+# More motor driver documentation: https://github.com/Aw3someAndrew/SteelBar_CircuitPython_powerful_bldc_driver
+
 """
 Brushless DC Motor Library ported to python
 """
@@ -63,7 +67,7 @@ class Motor:
         self.configure_command_mode(command_mode)
         self.set_quick_data_readout_format(self.QDRformat)
 
-    def set_speed(self, speed: int):
+    def set_speed(self, speed: float):
         try:
             speed = int(self.max_speed * clamp(speed, -1.0, 1.0))
             data = struct.pack("<i", speed)
