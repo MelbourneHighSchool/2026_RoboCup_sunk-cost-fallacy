@@ -39,14 +39,14 @@ class Vision:
         angle, ang_width, distance, x, y, w, h, rang  = self.ygoal_info_v[:]
         angle = self.convert_directional_angle(angle)
         ang_width = self.convert_directional_angle(ang_width)
-        return (angle, ang_width, distance, w, h, rang)
+        return (angle, ang_width, distance, x, y, w, h, rang)
 
     @property
     def bgoal_info(self):
         angle, ang_width, distance, x, y, w, h, rang = self.bgoal_info_v[:]
         angle = self.convert_directional_angle(angle)
         ang_width = self.convert_directional_angle(ang_width)
-        return (angle, ang_width, distance, w, h, rang)
+        return (angle, ang_width, distance, x, y, w, h, rang)
 
     @staticmethod
     def convert_directional_angle(angle):

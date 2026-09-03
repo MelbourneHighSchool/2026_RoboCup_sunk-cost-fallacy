@@ -31,7 +31,7 @@ def main(config):
         vision.wait_next_frame()
         # Draw on frame
         frame = vision.camera.latest_frame
-        center = (frame.shape[1] // 2 - 20, frame.shape[0] // 2 + 55)
+        center = (frame.shape[1] // 2, frame.shape[0] // 2)
 
         angle, dist, x, y, r = vision.ball_info
         frame = cv2.line(frame, (center[0], center[1]), (x, y), (50, 50, 255), 2, cv2.LINE_AA)
@@ -53,7 +53,7 @@ def main(config):
         vision.wait_next_frame()
         # Draw on frame
         frame = vision.camera.latest_frame
-        center = (frame.shape[1] // 2 - 20, frame.shape[0] // 2 + 55)
+        center = (frame.shape[1] // 2, frame.shape[0] // 2)
 
         raw_angle, ang_width, distance, x, y, w, h, rot = vision.bgoal_info
         angle = -(raw_angle * 180 / 32767 + 90) % 360
@@ -75,7 +75,7 @@ def main(config):
         vision.wait_next_frame()
         # Draw on frame
         frame = vision.camera.latest_frame
-        center = (frame.shape[1] // 2 - 20, frame.shape[0] // 2 + 55)
+        center = (frame.shape[1] // 2, frame.shape[0] // 2)
 
         raw_angle, ang_width, distance, x, y, w, h, rot = vision.ygoal_info
         angle = -(raw_angle * 180 / 32767 + 90) % 360
