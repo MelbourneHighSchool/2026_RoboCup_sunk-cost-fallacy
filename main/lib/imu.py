@@ -9,14 +9,14 @@ from adafruit_bno08x import BNO_REPORT_ACCELEROMETER, BNO_REPORT_ROTATION_VECTOR
 from adafruit_bno08x.i2c import BNO08X_I2C
 
 class IMU:
-    def __init__(self, poll_interval=0.01):
+    def __init__(self, poll_interval=0.01, yawCallback = lambda yaw:None):
         self._poll_interval = poll_interval
         self._lock = threading.Lock()
         self._running = True
         self._latest_quaternion = None
         self._latest_yaw = None
         self._latest_acceleration = None
-
+        self.yawCallback = yawCallback
         i2c = busio.I2C(board.SCL, board.SDA)
         self._bno = BNO08X_I2C(i2c)
         self._bno.enable_feature(BNO_REPORT_ACCELEROMETER)
@@ -42,6 +42,7 @@ class IMU:
                 quat_i, quat_j, quat_k, quat_real = self._bno.game_quaternion
                 accel_x, accel_y, accel_z = self._bno.acceleration
                 yaw = self._quaternion_to_yaw_degrees(quat_i, quat_j, quat_k, quat_real)
+                self.yawCallback(yaw)
                 with self._lock:
                     self._latest_quaternion = (quat_i, quat_j, quat_k, quat_real)
                     self._latest_yaw = yaw
@@ -65,7 +66,9 @@ class IMU:
     #         return self._latest_quaternion
 
     def calibrate_yaw(self):
-        self.wait_first(5)
+        wait_success = self.wait_first(5)
+        if not wait_success:
+            print("\n\n\n\nRUH ROH imu is not getting any readings. . . . . . .\n\n\n\n")
         with self._lock:
             self.yaw_offset = self._latest_yaw
 
