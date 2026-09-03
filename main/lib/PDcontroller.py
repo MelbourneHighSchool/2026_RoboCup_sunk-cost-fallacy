@@ -29,7 +29,7 @@ class PDController:
         else:
             derivative = 0.0
         
-        d_term = self.kd * self.clamp(derivative, -self.max_derivative, self.max_derivative)
+        d_term = self.kd * self.clamp(derivative, -self.max_derivative, self.max_derivative) # Limit derivative so that for yaw correction, when the angle switches from -180 to 180, correction speed doesn't become too slow
         
         # Save state for next step
         self.previous_error = error
