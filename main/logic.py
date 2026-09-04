@@ -397,6 +397,7 @@ R = min(vision.camera.size) / 2
 
 # Create robot instance
 robot = Robot()
+vision.load_config(robot.config)
 
 # Font settings
 default_font = (cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 5, cv2.LINE_AA)
