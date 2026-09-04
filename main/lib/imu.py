@@ -26,7 +26,6 @@ class IMU:
         self._thread.start()
 
         self.yaw_offset = 0
-        self.calibrate_yaw()
 
     def wait_first(self, timeout):
         start_time = time.time()
@@ -66,8 +65,8 @@ class IMU:
     #     with self._lock:
     #         return self._latest_quaternion
 
-    def calibrate_yaw(self):
-        wait_success = self.wait_first(5)
+    def calibrate_yaw(self, timeout=5):
+        wait_success = self.wait_first(timeout)
         if not wait_success:
             print("\n\n\n\nRUH ROH imu is not getting any readings. . . . . . .\n\n\n\n")
         with self._lock:
@@ -75,7 +74,12 @@ class IMU:
 
     def get_yaw(self):
         with self._lock:
-            return self._latest_yaw - self.yaw_offset
+            if self._latest_yaw is None: return None
+            if self.yaw_offset is not None:
+                return self._latest_yaw - self.yaw_offset
+            else:
+                print("Warn: yaw_offset is None")
+                return self._latest_yaw
 
     def get_acceleration(self):
         with self._lock:

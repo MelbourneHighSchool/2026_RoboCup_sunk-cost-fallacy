@@ -75,18 +75,18 @@ class Robot:
     def main_loop(self):
         self.update_stuff()
 
-        # self.attack_loop()
+        self.attack_loop()
         # self.defence_loop()
         # if self.see_goal:
         #     self.yaw_correct(self.to_absolute_dir(self.goal_dir))
         # self.yaw_correct()
 
-        # self.move()
+        self.move()
         # DEBUG
-        # print(self.ball_dir, self.ball_dist, self.have_ball)
+        print(self.ball_dir, self.ball_dist, self.have_ball)
         # print(self.goal_dir, self.goal_ang_width, self.goal_dist)
         # print(self.own_goal_dir, self.own_goal_dist)
-        print(self.pos_x, self.pos_y)
+        # print(self.pos_x, self.pos_y)
         
     
     def attack_loop(self):
@@ -388,16 +388,17 @@ class Robot:
 # Main script
 SEND_FRAME = True
 
+# Create robot instance
+
+robot = Robot()
+
 server = WSServer()
 server.run()
 
 vision = Vision()
+vision.load_config(robot.config)
 vision.start()
 R = min(vision.camera.size) / 2
-
-# Create robot instance
-robot = Robot()
-vision.load_config(robot.config)
 
 # Font settings
 default_font = (cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 5, cv2.LINE_AA)
