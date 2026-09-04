@@ -7,6 +7,7 @@ import numpy as np
 
 def main(config):
     vision = Vision()
+    vision.center_v[:] = (-20, 55)
     vision.start()
     vision.load_config(config)
 
@@ -14,12 +15,11 @@ def main(config):
     server.run()
 
     vision.wait_next_frame()
-
     while True:
         try:
             frame = vision.camera.latest_frame
 
-            center = (frame.shape[1] // 2 - 20, frame.shape[0] // 2 + 55)
+            center = vision.center_v[:]
 
             # Draw ball
             b_angle, b_dist, b_x, b_y, b_r = vision.ball_info
@@ -43,6 +43,11 @@ def main(config):
             yg_points = cv2.boxPoints(cv2.RotatedRect((float(yg_x), float(yg_y)), (float(yg_w), float(yg_h)), float(yg_rot)))
             frame = cv2.drawContours(frame, [yg_points], 0, (50, 255, 255), 2, cv2.LINE_AA)
 
+            # Draw center
+            frame = cv2.line(frame, (center[0] - 10, center[1]), (center[0] + 10, center[1]), (0, 200, 200), 2, cv2.LINE_AA)
+            frame = cv2.line(frame, (center[0], center[1] - 10), (center[0], center[1] + 10), (0, 200, 200), 2, cv2.LINE_AA)
+
+            # Puts text
             frame = cv2.putText(frame, f"Ball angle: {b_angle}", (15, 25), *((cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 5, cv2.LINE_AA)))
             frame = cv2.putText(frame, f"Ball dist: {b_dist}", (15, 55), *((cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 5, cv2.LINE_AA)))
             frame = cv2.putText(frame, f"BGoal angle: {bg_angle}", (15, 85), *((cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 5, cv2.LINE_AA)))

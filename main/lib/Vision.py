@@ -55,12 +55,14 @@ class Vision:
         return angle * 180 / 32767
 
     def load_config(self, config):
+        center = config.get_value("center")
+        if center is not None:
+            self.center_v[:] = center
+        
         hsv = config.get_value("hsv")
-        if hsv is None:
-            return False
-
-        self.ball_bounds_v[:] = hsv["ball"]["low"] + hsv["ball"]["high"]
-        self.goal_bounds_v[:] = hsv["bgoal"]["low"] + hsv["bgoal"]["high"] + hsv["ygoal"]["low"] + hsv["ygoal"]["high"]
+        if hsv is not None:
+            self.ball_bounds_v[:] = hsv["ball"]["low"] + hsv["ball"]["high"]
+            self.goal_bounds_v[:] = hsv["bgoal"]["low"] + hsv["bgoal"]["high"] + hsv["ygoal"]["low"] + hsv["ygoal"]["high"]
     
     def start(self):
         self.camera.start()
