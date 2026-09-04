@@ -15,6 +15,7 @@ component_group.add_argument("-v", "--vision", action="store_true", help="test v
 component_group.add_argument("-r", "--dribbler", action="store_true", help="test dribbler")
 component_group.add_argument("-i", "--interface", action="store_true", help="test interface")
 component_group.add_argument("-u", "--imu", action="store_true", help="test compass/imu")
+component_group.add_argument("-w", "--switches", action="store_true", help="test switches")
 
 program_group.add_argument("-b", "--ball-chasing", action="store_true", help="enable ball chasing")
 program_group.add_argument("-y", "--yaw-correction", action="store_true", help="enable yaw correction")
@@ -56,13 +57,14 @@ if mode == 0:
         preset = [args.drive, args.vision, args.dribbler, args.interface].index(True)
     res = term.radio_select(
         "Select a component to test",
-        ["Drive", "Vision", "Dribbler", "Interface", "IMU"],
+        ["Drive", "Vision", "Dribbler", "Interface", "IMU", "Switches"],
         descriptions=[
             "Test the drive system by giving motor commands.",
             "Test the vision system by detecting the ball and goals, and logging the information.",
             "Test the dribbler system by giving motor commands.",
             "Test the interface by logging messages from clients and sending messages to them.",
-            "Test the IMU by printing its outputs and logging the time it took to start."
+            "Test the IMU by printing its outputs and logging the time it took to start.",
+            "Test the switches by printing their states."
         ],
         preset=preset,
         tip="2/2"
@@ -111,6 +113,9 @@ match mode:
                 test_interface.main(config)
             case 4:
                 from test_files import test_imu
+            case 5:
+                from test_files import test_switches
+                test_switches.main(config)
     case 1:
         match res:
             case 1:

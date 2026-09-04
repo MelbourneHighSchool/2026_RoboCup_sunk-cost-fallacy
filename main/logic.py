@@ -7,6 +7,7 @@ from lib.kicker import Kicker
 from lib.dribbler import Dribbler
 from lib.localize import Localizer
 from lib.tof import ToF
+from lib.switch import Switch
 
 import time
 import cv2
@@ -39,6 +40,15 @@ class Robot:
         self.dribbler = Dribbler(self.config)
         self.tofs = (ToF(0x50), ToF(0x51), ToF(0x52), ToF(0x53), ToF(0x54), ToF(0x55), ToF(0x56), ToF(0x5f))
 
+        # Switches
+        switches = self.config.get_value("switches")
+
+        goal_conf = switches.get("goal")
+        self.goal_switch = Switch(goal_conf["pin"], goal_conf["on_high"])
+
+        run_conf = switches.get("run")
+        self.run_switch = Switch(str(run_conf["pin"]), run_conf["on_high"])
+
         # Ball
         self.see_ball = False
         self.have_ball = False
@@ -50,7 +60,7 @@ class Robot:
         self.GIVE_UP_CHASING_BALL_TIME = 0.5
 
         # Goal
-        self.TARGET_GOAL_IS_BLUE = True
+        self.target_goal_is_blue = True
         self.see_goal = False
         self.goal_dir = None
         self.goal_dist = None
@@ -207,7 +217,7 @@ class Robot:
             ygoal_ang_width,
             ygoal_dist,
     ):
-            if self.TARGET_GOAL_IS_BLUE:
+            if self.target_goal_is_blue:
                 target_angle, target_dist = bgoal_angle, bgoal_dist
                 own_angle, own_dist = ygoal_angle, ygoal_dist
                 goal_ang_width = bgoal_ang_width
@@ -407,8 +417,25 @@ padx = 15
 pady = 25
 line_spacing = 30
 
+robot.target_goal_is_blue = robot.goal_switch.read()
+print("===\nTarget: " + ("Blue goal" if robot.target_goal_is_blue else "Yellow goal") + "\n===")
+
+paused = True
+
 while True:
     try:
+        if not robot.run_switch.read():
+            robot.move_spd = 0
+            robot.move_dir = 0
+            robot.rot_spd = 0
+            robot.drive.move(robot.move_dir, robot.move_spd, robot.rot_spd)
+            paused = True
+            continue
+        if paused and robot.run_switch.read():
+            paused = False
+            robot.target_goal_is_blue = robot.goal_switch.read()
+            print("===\nTarget: " + ("Blue goal" if robot.target_goal_is_blue else "Yellow goal") + "\n===")
+
         # Ball
         bangle, bdist, bx, by, br = vision.ball_info
 

@@ -15,7 +15,7 @@ while True:
         host = x
     try:
         ws.connect(f"ws://{host}:8765", timeout=5)
-    except ConnectionRefusedError:
+    except ConnectionRefusedError, websocket.WebSocketAddressException:
         print(f"Failed to connect to ws://{host}:8765. Please check the host and try again.")
         continue
     ws.send('{"message": "register"}')
