@@ -386,14 +386,15 @@ class Robot:
 # -----------------------------------------------------------------------------------------------------------
 
 # Main script
-SEND_FRAME = True
+SEND_FRAME = False
 
 # Create robot instance
 
 robot = Robot()
 
 server = WSServer()
-server.run()
+if SEND_FRAME:
+    server.run()
 
 vision = Vision()
 vision.load_config(robot.config)
