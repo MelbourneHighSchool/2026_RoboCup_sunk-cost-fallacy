@@ -10,23 +10,15 @@ import random
 R = 1000
 def main(config):
     vision = Vision()
-    vision.center_v[0] += -10
-    vision.center_v[1] += 26
     vision.start()
     vision.load_config(config)
 
     server = WSServer()
     server.run()
 
-    last_center_time = time.time()
-
     vision.wait_next_frame()
     while True:
         try:
-            if time.time() >= last_center_time + 10:
-                vision.center_v[0] = random.randint(60, 580)
-                vision.center_v[1] = random.randint(60, 580)
-                last_center_time += 10
             frame = vision.camera.latest_frame
 
             center = vision.center_v[:]
@@ -78,6 +70,9 @@ def main(config):
             frame = cv2.putText(frame, f"YGoal dist: {yg_dist}", (15, 215), *((cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)))
 
             server.send_frame(frame)
+            # x = input("Give me x: ")
+            # if x.isnumeric():
+            #     vision.center_v[0] = int(x)
         except KeyboardInterrupt:
             break
 
