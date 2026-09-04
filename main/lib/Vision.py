@@ -36,14 +36,14 @@ class Vision:
     def ygoal_info(self):
         angle, ang_width, distance, x, y, w, h, rang  = self.ygoal_info_v[:]
         angle = self.convert_directional_angle(angle)
-        ang_width = self.convert_directional_angle(ang_width)
+        ang_width = self.convert_quantitative_angle(ang_width)
         return (angle, ang_width, distance, x, y, w, h, rang)
 
     @property
     def bgoal_info(self):
         angle, ang_width, distance, x, y, w, h, rang = self.bgoal_info_v[:]
         angle = self.convert_directional_angle(angle)
-        ang_width = self.convert_directional_angle(ang_width)
+        ang_width = self.convert_quantitative_angle(ang_width)
         return (angle, ang_width, distance, x, y, w, h, rang)
 
     @staticmethod
@@ -178,7 +178,7 @@ class Vision:
         if not enabled:
             return
         
-        frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:5]
+        frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:6]
         goal_mask_frame, values = keep_args  # also unpack hsv_frame from here if using
         goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v = values
         

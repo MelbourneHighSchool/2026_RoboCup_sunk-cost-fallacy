@@ -11,3 +11,6 @@ class Dribbler:
 
     def set_speed(self, speed):
         self.motor.set_speed(speed)
+
+    def set_torque(self, torque):
+        self.motor.set_torque(torque)

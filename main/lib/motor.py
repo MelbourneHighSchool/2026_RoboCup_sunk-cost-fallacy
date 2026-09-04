@@ -11,6 +11,7 @@ import struct
 import math
 
 MAX_SPEED = 546133333
+MAX_TORQUE = 100000
 
 # Quick Data Readout (QDR) short format (FORMAT = 0x00) layout, 10 bytes total:
 #   bytes 0-3 : uint32 POSITION (1 LSB = 1 electrical revolution)
@@ -41,6 +42,7 @@ class Motor:
                  operating_mode_and_sensor: tuple[int] = (3, 1),
                  command_mode: int = 12,
                  max_speed: int = MAX_SPEED,
+                 max_torque: int = MAX_TORQUE,
                  pole_pairs: int = DEFAULT_POLE_PAIRS,
                  gear_ratio: float = DEFAULT_GEAR_RATIO):
         self.i2c_address = address
@@ -63,6 +65,7 @@ class Motor:
         self.set_elec_angle_offset(elec_angle_offset)
         self.set_sin_cos_centre(sin_cos_centre)
         self.set_speed_limit(max_speed)
+        self.max_torque = max_torque
         self.configure_operating_mode_and_sensor(*operating_mode_and_sensor)
         self.configure_command_mode(command_mode)
         self.set_quick_data_readout_format(self.QDRformat)
@@ -118,6 +121,7 @@ class Motor:
 
     def set_torque(self, torque):
         try:
+            torque = int(self.max_torque * clamp(torque, -1.0, 1.0))
             data = struct.pack("<i", torque)
             self.bus.write_i2c_block_data(self.i2c_address, 0x11, list(data))
         except Exception as e:
