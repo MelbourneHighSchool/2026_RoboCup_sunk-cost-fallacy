@@ -60,7 +60,7 @@ class Robot:
         self.GIVE_UP_CHASING_BALL_TIME = 0.5
 
         # Goal
-        self.target_goal_is_blue = True
+        self.target_goal_is_blue = False
         self.see_goal = False
         self.goal_dir = None
         self.goal_dist = None
@@ -118,7 +118,7 @@ class Robot:
             self.stop_dribbler()
 
     def defence_loop(self):
-        KEEP_DIST = 60
+        KEEP_DIST = 15
         TOLERANCE = 5
         GOAL_WEIGHT = 0.1
         BALL_WEIGHT = 1.0
@@ -133,7 +133,8 @@ class Robot:
             move_dir_goal = self.own_goal_dir
         else:
             move_dir_goal = self.own_goal_dir + 180
-            
+
+        intercept = 0
         if self.see_ball:
             abs_goal_dir = self.to_absolute_dir(self.own_goal_dir)
             abs_ball_dir = self.to_absolute_dir(self.ball_dir)
@@ -146,6 +147,8 @@ class Robot:
             target_y = math.cos(math.radians(abs_ball_dir)) - math.cos(math.radians(abs_goal_dir))
             angle_target = math.degrees(math.atan2(target_x, target_y))
             self.yaw_correct(self.wrap_angle(angle_target), tolerance=12)
+
+            intercept = diff
         else:
             self.yaw_correct(self.to_absolute_dir(self.own_goal_dir) + 180, tolerance=12)
             if move_dir_goal == 0:
@@ -160,11 +163,13 @@ class Robot:
         move_vec_x = GOAL_WEIGHT * math.sin(goal_angle) + BALL_WEIGHT * math.sin(ball_angle)
         move_vec_y = GOAL_WEIGHT * math.cos(goal_angle) + BALL_WEIGHT * math.cos(ball_angle)
 
-        self.move_spd = min(0.2, math.hypot(move_vec_x, move_vec_y))
+        self.move_spd = min(0.4, math.hypot(move_vec_x, move_vec_y))
         if self.move_spd == 0:
             self.move_dir = 0
             return
 
+        if self.see_ball:
+            self.move_spd *= ((180 - abs(intercept)) / 180)**0.5
         move_angle = math.degrees(math.atan2(move_vec_x, move_vec_y))
         self.move_dir = self.to_relative_dir(self.wrap_angle(move_angle))
 
@@ -206,7 +211,7 @@ class Robot:
             self.ball_dist = None
 
         # Possession
-        self.have_ball = self.see_ball and self.ball_dist < 55 and -15 < self.ball_dir < -5
+        self.have_ball = self.see_ball and self.ball_dist < 43 and -8 < self.ball_dir < 8
 
     def update_goal_info(
             self,
@@ -262,7 +267,7 @@ class Robot:
     
     # ----- Actions ----- #
     def move(self):
-        self.avoid_out_of_bounds()
+        # self.avoid_out_of_bounds()
         self.drive.move(self.move_dir, self.move_spd, self.rot_spd)
         # self.drive.move(0, 0, self.rot_spd)
 
@@ -420,7 +425,7 @@ line_spacing = 30
 robot.target_goal_is_blue = robot.goal_switch.read()
 print("===\nTarget: " + ("Blue goal" if robot.target_goal_is_blue else "Yellow goal") + "\n===")
 
-paused = True
+paused = False
 
 while True:
     try:
@@ -432,7 +437,9 @@ while True:
             paused = True
             continue
         if paused and robot.run_switch.read():
+            # unpause
             paused = False
+            robot.imu.yaw_offset = robot.imu.get_yaw()
             robot.target_goal_is_blue = robot.goal_switch.read()
             print("===\nTarget: " + ("Blue goal" if robot.target_goal_is_blue else "Yellow goal") + "\n===")
 
