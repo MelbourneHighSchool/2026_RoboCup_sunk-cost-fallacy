@@ -58,7 +58,7 @@ class IMU:
     def _quaternion_to_yaw_degrees(x, y, z, w):
         siny_cosp = 2.0 * (w * z + x * y)
         cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-        return math.degrees(math.atan2(siny_cosp, cosy_cosp))
+        return -math.degrees(math.atan2(siny_cosp, cosy_cosp))
 
     # we don't use quaternions
     # def get_latest_quaternion(self):

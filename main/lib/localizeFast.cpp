@@ -9,8 +9,8 @@
 #include <queue>
 using namespace std; //yeah bad practice whatever
 
-const float fieldW = 1820, fieldh = 2430, fieldRW = 910, fieldRH = 1215, fieldGoalRH = 0;
-
+const int fieldW = 1820, fieldh = 2430, maxRayDist = 2900, fieldRW = 910, fieldRH = 1215, fieldGoalRH = 0;
+const int tofRadius = 50;
 
 array<float,8> rayX;
 array<float,8> rayY;
@@ -23,13 +23,12 @@ mutex outlock;
 /// @param py y position of the robot
 /// @param a bearing of the robot (0 forward, + clockwise)
 /// @return array of simulated tof distances
-void estDistances(float* px, float* py, float* a, array<float,8>::iterator start){
+void estDistances(int* px, int* py, float* a, array<float,8>::iterator cur){
     
     for (int i = 0; i < 8; i++){
         rayX[i] = sin(i*M_PI_4 + *a);
         rayY[i] = cos(i*M_PI_4 + *a);
     }
-    auto cur = start;
     for (int i = 0; i < 8; i++){
         *cur = min(
             abs(
@@ -53,13 +52,24 @@ bernoulli_distribution disBool(1);
 auto rnd = bind(dis01f, gen);
 auto rndBool = bind(disBool, gen);
 auto rndNorm = bind(disNormal, gen);
-array<int,8> targetDists;
+array<float,8> targetDists;
 float targetAngle;
 array<float,8> dists;
+array<bool, 8> badToF;
 float lowestErr, error, temperature;
-float bestX, bestY, bestAngle;
-float guessX, guessY, guessAngle;
+int bestX, bestY, guessX, guessY;
+float bestAngle, guessAngle;
 char action;
+
+void calcTotalError(float* out, array<float,8>::iterator ptrGuess) {
+    *out = 0;
+    auto ptrTarget = targetDists.begin();
+    auto ptrBad = badToF.begin();
+    for (unsigned int i = 0; i < 8; i++){
+        if (not *ptrBad) {*out += 500 * abs(*ptrGuess - *ptrTarget) /* / *ptrTarget; */ ;} 
+        ptrGuess++; ptrTarget++; ptrBad++;
+    }
+}
 
 /// @brief Function for daemon localization thread. do you spell localization with s or z? idk.
 void localiseLoop(){
@@ -72,22 +82,20 @@ void localiseLoop(){
     bestAngle = targetAngle;
     //cin >> angle;
     estDistances(&guessX,&guessY,&guessAngle,dists.begin());
-    error = 0;
-    lowestErr = error;
+    calcTotalError(&lowestErr, dists.begin());
+    
     while (true){
         //modify guess position randomly
         temperature = error/30;
         guessAngle = targetAngle;
-        guessX = clamp(guessX + (rndNorm() * temperature),-fieldRW + 105, fieldRW - 105);
-        guessY = clamp(guessY + (rndNorm() * temperature),-fieldRH + 105, fieldRH - 105);
+        guessX = clamp(guessX + (int)round(rndNorm() * temperature),-fieldRW + 105, fieldRW - 105);
+        guessY = clamp(guessY + (int)round(rndNorm() * temperature),-fieldRH + 105, fieldRH - 105);
         //simulate sensor measurements for this position
         estDistances(&guessX, &guessY, &guessAngle, dists.begin());
         //calculate difference between actual measurements and these measurements
         inlock.lock();
-        error = 0;//min(min(guessAngle - targetAngle + (float)(2*M_PI),targetAngle - guessAngle + (float)(2*M_PI)),abs(targetAngle-guessAngle));
-        for (int j = 0; j < 8; j++){
-            error += abs(max(targetDists[j]-dists[j],-100.0f));
-        }
+        calcTotalError(&error, dists.begin());
+        
         inlock.unlock();
         //if this position has lower error then stored position, update stored position
         if (error < lowestErr){
@@ -104,9 +112,6 @@ void localiseLoop(){
     }
 }
 array<float,8> mdists;
-array<queue<float>,8> prevDists;
-array<float,8> avgPrevDists;
-const int numSmoothingMeasurements = 8;
 float merr;
 int tIdx;
 float tValue;
@@ -115,10 +120,7 @@ int main(){
     targetAngle = 0;
     for (int i = 0; i < 8; i++){
         targetDists[i] = 0;
-        avgPrevDists[i] = 1000 * numSmoothingMeasurements;
-        for (int _ = 0; _ < numSmoothingMeasurements; _++){
-            prevDists[i].push(1000);
-        }
+        badToF[i] = false;
     }
     cin.tie(nullptr);
     ios_base::sync_with_stdio(false);
@@ -137,23 +139,23 @@ int main(){
             if (tIdx == 8){
                 targetAngle = tValue;
             } else {
-                if (abs(((numSmoothingMeasurements*tValue)/avgPrevDists[tIdx]) - 1) <0.35){
-                    targetDists[tIdx] = tValue;
+                if (tValue < (200 - tofRadius)){
+                    badToF[tIdx] = true;
+                    // prevent bad tof from erroneously labeling the opposite ToF as bad
+                    targetDists[tIdx] = tValue + tofRadius; 
+                } else if (tValue + targetDists[(tIdx + 8) % 8] + tofRadius > maxRayDist){
+                    badToF[tIdx] = true;
+                } else{
+                    badToF[tIdx] = false;
+                    targetDists[tIdx] = tValue + tofRadius;
                 }
-                avgPrevDists[tIdx] += tValue;
-                avgPrevDists[tIdx] -= prevDists[tIdx].front();
-                prevDists[tIdx].push(tValue);
-                prevDists[tIdx].pop();
             } 
             inlock.unlock();
             bestAngle = targetAngle;
             outlock.lock();
             estDistances(&bestX,&bestY,&bestAngle,mdists.begin());
             outlock.unlock();
-            merr = 0;//min(min(bestAngle - targetAngle + (float)(2*M_PI),targetAngle - bestAngle + (float)(2*M_PI)),abs(bestAngle-guessAngle));
-            for (int i = 0; i < 8; i++){
-                merr += abs(max(targetDists[i]-mdists[i],-100.0f));
-            }
+            calcTotalError(&merr, mdists.begin());
             lowestErr = merr;
         } else if (action == 'o'){
             outlock.lock();
