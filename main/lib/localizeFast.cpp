@@ -9,8 +9,8 @@
 #include <queue>
 using namespace std; //yeah bad practice whatever
 
-const float fieldW = 1820, fieldh = 2430, fieldRW = 910, fieldRH = 1215, fieldGoalRH = 0;
-
+const int fieldW = 1820, fieldh = 2430, maxRayDist = 2900, fieldRW = 910, fieldRH = 1215, fieldGoalRH = 0;
+const int tofRadius = 50;
 
 array<float,8> rayX;
 array<float,8> rayY;
@@ -43,11 +43,13 @@ void estDistances(float* px, float* py, float* a, array<float,8>::iterator cur){
         cur++;
     }
 }
-void calcTotalError(float* out, array<float,8>::iterator ptr1,array<float,8>::iterator ptr2) {
+void calcTotalError(float* out, array<float,8>::iterator ptrGuess) {
     *out = 0;
-    for (uint i = 0; i < 8; i++){
-        *out += sqrt(abs(*ptr1 - *ptr2));
-        ptr1++;ptr2++;
+    auto ptrTarget = targetDists.begin();
+    auto ptrBad = badToF.begin();
+    for (unsigned int i = 0; i < 8; i++){
+        if (not *ptrBad) {*out += 500 * abs(*ptrGuess - *ptrTarget) /* / *ptrTarget; */ ;} 
+        ptrGuess++; ptrTarget++; ptrBad++;
     }
 }
 
@@ -79,7 +81,7 @@ void localiseLoop(){
     bestAngle = targetAngle;
     //cin >> angle;
     estDistances(&guessX,&guessY,&guessAngle,dists.begin());
-    calcTotalError(&lowestErr, dists.begin(), targetDists.begin());
+    calcTotalError(&lowestErr, dists.begin());
     
     while (true){
         //modify guess position randomly
@@ -91,7 +93,7 @@ void localiseLoop(){
         estDistances(&guessX, &guessY, &guessAngle, dists.begin());
         //calculate difference between actual measurements and these measurements
         inlock.lock();
-        calcTotalError(&error, dists.begin(),targetDists.begin());
+        calcTotalError(&error, dists.begin());
         
         inlock.unlock();
         //if this position has lower error then stored position, update stored position
@@ -109,7 +111,7 @@ void localiseLoop(){
     }
 }
 array<float,8> mdists;
-
+array<bool, 8> badToF;
 float merr;
 int tIdx;
 float tValue;
@@ -118,6 +120,7 @@ int main(){
     targetAngle = 0;
     for (int i = 0; i < 8; i++){
         targetDists[i] = 0;
+        badToF[i] = false;
     }
     cin.tie(nullptr);
     ios_base::sync_with_stdio(false);
@@ -136,14 +139,23 @@ int main(){
             if (tIdx == 8){
                 targetAngle = tValue;
             } else {
-                targetDists[tIdx] = tValue;
+                if (tValue < (200 - tofRadius)){
+                    badToF[tIdx] = true;
+                    // prevent bad tof from erroneously labeling the opposite ToF as bad
+                    targetDists[tIdx] = tValue + tofRadius; 
+                } else if (tValue + targetDists[(tIdx + 8) % 8] + tofRadius > maxRayDist){
+                    badToF[tIdx] = true;
+                } else{
+                    badToF[tIdx] = false;
+                    targetDists[tIdx] = tValue + tofRadius;
+                }
             } 
             inlock.unlock();
             bestAngle = targetAngle;
             outlock.lock();
             estDistances(&bestX,&bestY,&bestAngle,mdists.begin());
             outlock.unlock();
-            calcTotalError(&merr, mdists.begin(), targetDists.begin());
+            calcTotalError(&merr, mdists.begin());
             lowestErr = merr;
         } else if (action == 'o'){
             outlock.lock();
