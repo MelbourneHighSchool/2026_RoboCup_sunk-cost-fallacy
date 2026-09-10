@@ -85,18 +85,19 @@ class Robot:
     def main_loop(self):
         self.update_stuff()
 
-        self.attack_loop()
+        # self.attack_loop()
+        if self.see_ball:
+            self.ball_capture()
+        self.yaw_correct()
         # self.defence_loop()
-        # if self.see_goal:
-        #     self.yaw_correct(self.to_absolute_dir(self.goal_dir))
-        # self.yaw_correct()
 
-        self.move()
+
+        self.move()    
         # DEBUG
-        print(self.ball_dir, self.ball_dist, self.have_ball)
+        # print(self.ball_dir, self.ball_dist, self.have_ball)
         # print(self.goal_dir, self.goal_ang_width, self.goal_dist)
         # print(self.own_goal_dir, self.own_goal_dist)
-        # print(self.pos_x, self.pos_y)
+        print(self.pos_x, self.pos_y)
         
     
     def attack_loop(self):
@@ -113,20 +114,28 @@ class Robot:
         elif self.see_ball:
             self.ball_capture()
         else:
-            self.move_spd = 0
-            self.move_dir = 0
-            self.stop_dribbler()
+            self.move_spd = 0.005
+            self.move_dir = -180
 
     def defence_loop(self):
-        KEEP_DIST = 15
+        KEEP_DIST = 50
         TOLERANCE = 5
         GOAL_WEIGHT = 0.1
         BALL_WEIGHT = 1.0
+
+        if self.see_ball and self.ball_dist < 70:
+            print("switching to attack", self.ball_dist)
+            self.attack_loop()
+            return
+        
         if not self.see_own_goal:
             self.rot_spd = 0
             self.move_spd = 0
             return
-  
+
+        if self.see_ball and abs(self.to_absolute_dir(self.own_goal_dir)) < 90 and abs(self.to_absolute_dir(self.ball_dir)) > 90:
+            print("Aaa")
+            return
         if KEEP_DIST - TOLERANCE < self.own_goal_dist < KEEP_DIST + TOLERANCE:
             move_dir_goal = 0
         elif self.own_goal_dist > KEEP_DIST + TOLERANCE:
@@ -163,7 +172,7 @@ class Robot:
         move_vec_x = GOAL_WEIGHT * math.sin(goal_angle) + BALL_WEIGHT * math.sin(ball_angle)
         move_vec_y = GOAL_WEIGHT * math.cos(goal_angle) + BALL_WEIGHT * math.cos(ball_angle)
 
-        self.move_spd = min(0.4, math.hypot(move_vec_x, move_vec_y))
+        self.move_spd = min(0.3, math.hypot(move_vec_x, move_vec_y))
         if self.move_spd == 0:
             self.move_dir = 0
             return
@@ -174,17 +183,19 @@ class Robot:
         self.move_dir = self.to_relative_dir(self.wrap_angle(move_angle))
 
     def ball_capture(self):
-        MOVE_FORWARD_ANGLE = 45  # ±
+        MOVE_FORWARD_ANGLE = 35  # ±
         ORBIT_RADIUS = 85
-        SPD_MAX = 0.25
+        SPD_MAX = 0.35
         SPD_MIN = 0.05
 
-        self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.05, 80)
+        self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.05, 100)
 
         if abs(self.ball_dir) < 10:
             self.move_dir = self.ball_dir
+            self.move_spd = SPD_MAX
+            return
         elif abs(self.ball_dir) < MOVE_FORWARD_ANGLE:
-            self.move_dir = self.ball_dir * 2.3
+            self.move_dir = self.ball_dir * 2.25
         elif self.ball_dist <= ORBIT_RADIUS:
             distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
             orbit_angle = 90 + distance_ratio * 90
@@ -211,7 +222,7 @@ class Robot:
             self.ball_dist = None
 
         # Possession
-        self.have_ball = self.see_ball and self.ball_dist < 43 and -8 < self.ball_dir < 8
+        self.have_ball = self.see_ball and self.ball_dist < 40 and -7 < self.ball_dir < 7
 
     def update_goal_info(
             self,
@@ -246,7 +257,7 @@ class Robot:
 
     def update_stuff(self):
         # IMU
-        self.bot_dir = -1 * self.wrap_angle(self.imu.get_yaw())
+        self.bot_dir = self.wrap_angle(self.imu.get_yaw())
 
         # Region
         # if abs(self.pos_x) > 350:
@@ -267,7 +278,7 @@ class Robot:
     
     # ----- Actions ----- #
     def move(self):
-        # self.avoid_out_of_bounds()
+        self.avoid_out_of_bounds()
         self.drive.move(self.move_dir, self.move_spd, self.rot_spd)
         # self.drive.move(0, 0, self.rot_spd)
 
