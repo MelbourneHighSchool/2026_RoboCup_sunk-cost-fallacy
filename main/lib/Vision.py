@@ -17,6 +17,18 @@ import numpy as np
 import struct
 import time
 
+def get_internal_angles(angles):
+    angles = sorted(angles)
+    gaps = [
+        angles[i+1] - angles[i]
+        for i in range(3)
+    ]
+    gaps.append(angles[0] + 360 - angles[3])
+    i = np.argmax(gaps)
+    ordered = angles[i+1:] + angles[:i+1]
+    inner = ordered[1:3]
+    return inner
+
 class Vision:
     def __init__(self):
         self.camera = Camera()
@@ -97,10 +109,10 @@ class Vision:
     @staticmethod
     def ball_proc_init(ball_bounds_v, ball_info_v, frame_shape):
         mask_frame = np.zeros(shape=frame_shape[:2], dtype=np.uint8)  # 2D array since only 1 channel
-        return (ball_bounds_v, ball_info_v, mask_frame)
+        return [ball_bounds_v, ball_info_v, mask_frame]
 
     @staticmethod
-    def ball_proc_loop(base_args: BaseProcArgs, keep_args: dict[str, Any]):
+    def ball_proc_loop(base_args: BaseProcArgs, keep_args: list):
         enabled = base_args.enabled
         if not enabled:
             return
@@ -210,11 +222,25 @@ class Vision:
             relative_y = goal_center_y - center_y
 
             distance = min(32767, int(np.hypot(relative_x, relative_y)))
-            angle = int(np.arctan2(relative_y, relative_x) / np.pi * 32767)
 
             rect_points = cv2.boxPoints(rect)  # Gives corners as [(x1, y1), (x2, y2)...]
-            rect_point_angles = (np.arctan2(rect_points[:, 1] - center_y, rect_points[:, 0] - center_x) / np.pi * 32767).astype(np.int16)
-            angular_goal_width = min(np.abs(rect_point_angles - angle))
+            rect_point_angles = np.arctan2(rect_points[:, 1] - center_y, rect_points[:, 0] - center_x)
+            internal_angles = get_internal_angles(rect_point_angles)
+            center_angle = sum(internal_angles) / 2  # But what if angle wrapping? Might have to add 180°
+            ang_width = abs(internal_angles[1] - internal_angles[0]) / 2
+            if abs(internal_angles[1] - internal_angles[0]) >= np.pi:
+                center_angle += np.pi
+                ang_width = np.pi - ang_width
+
+            # Convert angle to ±180
+            center_angle %= (2 * np.pi)
+            if center_angle > np.pi:
+                center_angle -= 2 * np.pi
+
+            angle = int(center_angle / np.pi * 32767)
+            ang_width = int(ang_width / np.pi * 32767)
+
+            # angular_goal_width = min(np.abs(rect_point_angles - angle))
 
             # polygon = cv2.approxPolyDP(bestContour, ke * cv2.arcLength(bestContour, True), True)
             # goal_center_x, goal_center_y = np.mean(polygon[:, 0, :], axis=0).astype(np.int16)
@@ -225,7 +251,7 @@ class Vision:
             goal_height = int(goal_height)
             rect_angle = int(rect_angle)
 
-            goal_info_v[:] = angle, angular_goal_width, distance, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle
+            goal_info_v[:] = angle, ang_width, distance, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle
             # time.sleep(0.5)  # DEBUG
             # if enabled_flag == 1:  # DEBUG
                 # cv2.imwrite("/var/www/html/frame.jpg", np.hstack((cv2.cvtColor(goal_mask_frame, cv2.COLOR_GRAY2BGR), frame, hsv_frame)))  # DEBUG
