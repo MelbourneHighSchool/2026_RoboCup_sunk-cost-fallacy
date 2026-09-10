@@ -23,7 +23,7 @@ mutex outlock;
 /// @param py y position of the robot
 /// @param a bearing of the robot (0 forward, + clockwise)
 /// @return array of simulated tof distances
-void estDistances(float* px, float* py, float* a, array<float,8>::iterator cur){
+void estDistances(int* px, int* py, float* a, array<float,8>::iterator cur){
     
     for (int i = 0; i < 8; i++){
         rayX[i] = sin(i*M_PI_4 + *a);
@@ -43,16 +43,6 @@ void estDistances(float* px, float* py, float* a, array<float,8>::iterator cur){
         cur++;
     }
 }
-void calcTotalError(float* out, array<float,8>::iterator ptrGuess) {
-    *out = 0;
-    auto ptrTarget = targetDists.begin();
-    auto ptrBad = badToF.begin();
-    for (unsigned int i = 0; i < 8; i++){
-        if (not *ptrBad) {*out += 500 * abs(*ptrGuess - *ptrTarget) /* / *ptrTarget; */ ;} 
-        ptrGuess++; ptrTarget++; ptrBad++;
-    }
-}
-
 
 random_device rd;
 mt19937 gen(rd());
@@ -65,10 +55,21 @@ auto rndNorm = bind(disNormal, gen);
 array<float,8> targetDists;
 float targetAngle;
 array<float,8> dists;
+array<bool, 8> badToF;
 float lowestErr, error, temperature;
-float bestX, bestY, bestAngle;
-float guessX, guessY, guessAngle;
+int bestX, bestY, guessX, guessY;
+float bestAngle, guessAngle;
 char action;
+
+void calcTotalError(float* out, array<float,8>::iterator ptrGuess) {
+    *out = 0;
+    auto ptrTarget = targetDists.begin();
+    auto ptrBad = badToF.begin();
+    for (unsigned int i = 0; i < 8; i++){
+        if (not *ptrBad) {*out += 500 * abs(*ptrGuess - *ptrTarget) /* / *ptrTarget; */ ;} 
+        ptrGuess++; ptrTarget++; ptrBad++;
+    }
+}
 
 /// @brief Function for daemon localization thread. do you spell localization with s or z? idk.
 void localiseLoop(){
@@ -87,8 +88,8 @@ void localiseLoop(){
         //modify guess position randomly
         temperature = error/30;
         guessAngle = targetAngle;
-        guessX = clamp(guessX + (rndNorm() * temperature),-fieldRW + 105, fieldRW - 105);
-        guessY = clamp(guessY + (rndNorm() * temperature),-fieldRH + 105, fieldRH - 105);
+        guessX = clamp(guessX + (int)round(rndNorm() * temperature),-fieldRW + 105, fieldRW - 105);
+        guessY = clamp(guessY + (int)round(rndNorm() * temperature),-fieldRH + 105, fieldRH - 105);
         //simulate sensor measurements for this position
         estDistances(&guessX, &guessY, &guessAngle, dists.begin());
         //calculate difference between actual measurements and these measurements
@@ -111,7 +112,6 @@ void localiseLoop(){
     }
 }
 array<float,8> mdists;
-array<bool, 8> badToF;
 float merr;
 int tIdx;
 float tValue;
