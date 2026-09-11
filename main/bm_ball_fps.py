@@ -23,6 +23,6 @@ vision.camera.stop()
 c_new_frame = vision.camera.c_new_frame
 v_latest_timestamp = vision.camera.v_latest_timestamp
 for i in range(2000):
-    c_new_frame.notify_all()
     v_latest_timestamp.value += 0.001
+    c_new_frame.notify_all()
     time.sleep(0.001)
