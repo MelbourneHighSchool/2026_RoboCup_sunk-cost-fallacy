@@ -255,3 +255,44 @@ class Vision:
             # time.sleep(0.5)  # DEBUG
             # if enabled_flag == 1:  # DEBUG
                 # cv2.imwrite("/var/www/html/frame.jpg", np.hstack((cv2.cvtColor(goal_mask_frame, cv2.COLOR_GRAY2BGR), frame, hsv_frame)))  # DEBUG
+    
+    # def bot_proc_setup(self):
+    #     self.field_bounds_v = Array(c_uint8, (70, 51, 77, 110, 255, 255))
+    #     # self.line_bounds_v = Array(c_uint8, (0, 0, 230, 255, 20, 255))
+    #     self.bot_info_v = Array(c_int16, (0, 1, 2, 3))  # Angle, distance, x, y for only one robot
+    #     self.broadcaster.register_proc(
+    #         "Bot",
+    #         self.goal_proc_init,
+    #         self.goal_proc_loop,
+    #         None,
+    #         (
+    #             self.field_bounds_v,
+    #             # self.line_bounds_v,
+    #             self.bot_info_v,
+    #             self.camera.frame_shape
+    #         )
+    #     )
+
+    # @staticmethod
+    # def bot_proc_init(self, field_bounds_v, bot_info_v, frame_shape):
+    #     mask_frame = np.zeros(shape=frame_shape[:2], dtype=np.uint8)
+    #     return [field_bounds_v, bot_info_v, mask_frame]
+
+    # @staticmethod
+    # def bot_proc_loop(self, base_args, keep_args):
+    #     enabled = base_args.enabled
+    #     if not enabled:
+    #         return
+        
+    #     frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:6]
+    #     field_bounds_v, bot_info_v, mask_frame = keep_args
+
+    #     cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, frame)
+    #     cv2.inRange(frame, field_bounds_v[:3], field_bounds_v[3:], mask_frame)  # Test it is possible to inRange like this
+    #     cv2.morphologyEx(frame, )
+    #     contours = cv2.findContours(mask_frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+    #     if not contours:
+    #         print("[Bot Detection] WARN: Cannot find field contour. Mask wrong colour perhaps?")
+    #         return
+        
+    #     bestContour = max(contours, key=cv2.contourArea)
