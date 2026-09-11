@@ -109,7 +109,7 @@ class Vision:
     @staticmethod
     def ball_proc_init(ball_bounds_v, ball_info_v, frame_shape):
         mask_frame = np.zeros(shape=frame_shape[:2], dtype=np.uint8)  # 2D array since only 1 channel
-        return [ball_bounds_v, ball_info_v, mask_frame]
+        return [ball_bounds_v, ball_info_v, mask_frame, 0.0]
 
     @staticmethod
     def ball_proc_loop(base_args: BaseProcArgs, keep_args: list):
@@ -118,7 +118,11 @@ class Vision:
             return
         
         frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:6]
-        ball_bounds_v, ball_info_v, mask_frame = keep_args
+        ball_bounds_v, ball_info_v, mask_frame, last_processed_time = keep_args
+
+        now = time.time()
+        print(now - last_processed_time)
+        last_processed_time = now
 
         # Find ball
         pixel_pos = None
