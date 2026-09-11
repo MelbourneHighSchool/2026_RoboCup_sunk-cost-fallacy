@@ -93,6 +93,7 @@ class Vision:
     def ball_proc_setup(self):
         self.ball_bounds_v = Array(c_uint8, (0, 120, 160, 30, 255, 255))  # (lboundH, S, V, uboundH, S, V) - change defaults later!
         self.ball_info_v = Array(c_int16, (0, 0, 0, 0, 0))  # angle, dist, x, y, r
+        self.ball_time_v = Array(c_float, (0, 0, 0, 0, 0, 0, 0, 0, 0, 0))  # last 10 timestamps of ball detection
 
         self.broadcaster.register_proc(
             "Ball",
@@ -102,14 +103,15 @@ class Vision:
             (
                 self.ball_bounds_v,
                 self.ball_info_v,
-                self.camera.frame_shape
+                self.camera.frame_shape,
+                self.ball_time_v
             )
         )
     
     @staticmethod
-    def ball_proc_init(ball_bounds_v, ball_info_v, frame_shape):
+    def ball_proc_init(ball_bounds_v, ball_info_v, frame_shape, ball_time_v):
         mask_frame = np.zeros(shape=frame_shape[:2], dtype=np.uint8)  # 2D array since only 1 channel
-        return [ball_bounds_v, ball_info_v, mask_frame, 0.0]
+        return [ball_bounds_v, ball_info_v, mask_frame, ball_time_v]
 
     @staticmethod
     def ball_proc_loop(base_args: BaseProcArgs, keep_args: list):
@@ -118,11 +120,11 @@ class Vision:
             return
         
         frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:6]
-        ball_bounds_v, ball_info_v, mask_frame, last_processed_time = keep_args
+        ball_bounds_v, ball_info_v, mask_frame, ball_time_v = keep_args
 
-        now = time.time()
-        print(now - last_processed_time)
-        last_processed_time = now
+        ball_time_v[:] = ball_time_v[1:] + [latest_timestamp]  # Shift left and add new timestamp
+
+        # print(ball_time_v[:])  # DEBUG
 
         # Find ball
         pixel_pos = None
@@ -166,6 +168,8 @@ class Vision:
         self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0))
         self.enabled_goals_v = Value(c_uint8, 3)  # 2^0 bit: Blue goal enabled, 2^1 bit: Yellow goal enabled
 
+        self.goal_time_v = Array(c_float, (0, 0, 0, 0, 0, 0, 0, 0, 0, 0))  # last 10 timestamps of goal detection
+
         self.broadcaster.register_proc(
             "Goals",
             self.goal_proc_init,
@@ -176,17 +180,18 @@ class Vision:
                 self.bgoal_info_v,
                 self.ygoal_info_v,
                 self.enabled_goals_v,
-                self.camera.frame_shape
+                self.camera.frame_shape,
+                self.goal_time_v
             )
         )
 
     @staticmethod
-    def goal_proc_init(goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v, frame_shape):
+    def goal_proc_init(goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v, frame_shape, goal_time_v):
         # hsv_frame = np.zeros(shape=frame_shape, dtype=np.uint8)  # DEBUG
         goal_mask_frame = np.zeros(shape=frame_shape[:2], dtype=np.uint8)
         values = [goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v]
 
-        return [goal_mask_frame, values]  # Also add hsv_frame if using for debug
+        return [goal_mask_frame, values, goal_time_v]  # Also add hsv_frame if using for debug
     
     @staticmethod
     def goal_proc_loop(base_args: BaseProcArgs, keep_args: dict):
@@ -195,8 +200,10 @@ class Vision:
             return
         
         frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:6]
-        goal_mask_frame, values = keep_args  # also unpack hsv_frame from here if using
+        goal_mask_frame, values, goal_time_v = keep_args  # also unpack hsv_frame from here if using
         goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v = values
+
+        goal_time_v[:] = goal_time_v[1:] + [latest_timestamp]  # Shift left and add new timestamp
         
         enabled_goals = enabled_goals_v.value
         # cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, hsv_frame)  # DEBUG (Replace line below)
