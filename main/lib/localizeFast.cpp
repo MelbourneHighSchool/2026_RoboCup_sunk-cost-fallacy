@@ -159,6 +159,10 @@ int main(){
             lowestErr = merr;
         } else if (action == 'o'){
             outlock.lock();
+            cout << bestX << "\n" << bestY << "\n";
+            outlock.unlock();
+        } else if (action == 'd'){
+            outlock.lock();
             cout << bestX << "\n" << bestY << "\n" << bestAngle <<"\n";
             inlock.lock();
             for (int i = 0; i < 8; i++){
