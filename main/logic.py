@@ -8,6 +8,7 @@ from lib.dribbler import Dribbler
 from lib.localize import Localizer
 from lib.tof import ToF
 from lib.switch import Switch
+from lib.PDcontroller import PDController
 
 import time
 import cv2
@@ -57,7 +58,7 @@ class Robot:
         self.last_ball_dir = None
         self.last_ball_dist = None
         self.last_ball_see_time = 0
-        self.GIVE_UP_CHASING_BALL_TIME = 0.5
+        self.GIVE_UP_CHASING_BALL_TIME = 0.8
 
         # Goal
         self.target_goal_is_blue = False
@@ -80,19 +81,20 @@ class Robot:
         self.pos_y = -450
         self.yaw_error = 0
         self.yaw_error_time = time.monotonic()
+        self.yaw_controller = PDController(kp=0.001, kd=0.00001, max_derivative=100)
+        self.yaw_controller.previous_error = self.yaw_error
+        self.yaw_controller.previous_time = self.yaw_error_time
+        self.ball_speed_controller = PDController(kp=0.001, kd=0.005, max_derivative=100)
         
     
     def main_loop(self):
         self.update_stuff()
 
         # self.attack_loop()
-        if self.see_ball:
-            self.ball_capture()
-        self.yaw_correct()
         # self.defence_loop()
 
+        self.move()   
 
-        self.move()    
         # DEBUG
         # print(self.ball_dir, self.ball_dist, self.have_ball)
         # print(self.goal_dir, self.goal_ang_width, self.goal_dist)
@@ -110,11 +112,11 @@ class Robot:
             self.move_dir = 0
             self.move_spd = 0.3
             self.kick()
-            pass
+
         elif self.see_ball:
             self.ball_capture()
         else:
-            self.move_spd = 0.005
+            self.move_spd = 0.03
             self.move_dir = -180
 
     def defence_loop(self):
@@ -123,7 +125,7 @@ class Robot:
         GOAL_WEIGHT = 0.1
         BALL_WEIGHT = 1.0
 
-        if self.see_ball and self.ball_dist < 70:
+        if self.see_ball and self.ball_dist < 85:
             print("switching to attack", self.ball_dist)
             self.attack_loop()
             return
@@ -134,8 +136,8 @@ class Robot:
             return
 
         if self.see_ball and abs(self.to_absolute_dir(self.own_goal_dir)) < 90 and abs(self.to_absolute_dir(self.ball_dir)) > 90:
-            print("Aaa")
             return
+
         if KEEP_DIST - TOLERANCE < self.own_goal_dist < KEEP_DIST + TOLERANCE:
             move_dir_goal = 0
         elif self.own_goal_dist > KEEP_DIST + TOLERANCE:
@@ -185,17 +187,17 @@ class Robot:
     def ball_capture(self):
         MOVE_FORWARD_ANGLE = 35  # ±
         ORBIT_RADIUS = 85
-        SPD_MAX = 0.35
+        SPD_MAX = 0.3
         SPD_MIN = 0.05
 
-        self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.05, 100)
+        base_speed = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.05, 80)
 
         if abs(self.ball_dir) < 10:
             self.move_dir = self.ball_dir
             self.move_spd = SPD_MAX
             return
         elif abs(self.ball_dir) < MOVE_FORWARD_ANGLE:
-            self.move_dir = self.ball_dir * 2.25
+            self.move_dir = self.ball_dir * 2.3
         elif self.ball_dist <= ORBIT_RADIUS:
             distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
             orbit_angle = 90 + distance_ratio * 90
@@ -221,7 +223,7 @@ class Robot:
             self.ball_dir = None
             self.ball_dist = None
 
-        # Possession
+        # Possession detection
         self.have_ball = self.see_ball and self.ball_dist < 40 and -7 < self.ball_dir < 7
 
     def update_goal_info(
@@ -253,33 +255,33 @@ class Robot:
             self.own_goal_ang_width = self.wrap_angle(own_goal_ang_width) if target_dist != 0 else None
             self.see_own_goal = self.own_goal_dir is not None and self.own_goal_dist is not None
 
-            
-
     def update_stuff(self):
         # IMU
         self.bot_dir = self.wrap_angle(self.imu.get_yaw())
 
         # Region
-        # if abs(self.pos_x) > 350:
-        #     if self.pos_y > 700:
-        #         self.region = RobotRegions.GOAL_SIDE
-        #     elif self.pos_y < -640:
-        #         self.region = RobotRegions.OWN_GOAL_SIDE
-        #     elif abs(self.pos_x):
-        #         self.region = RobotRegions.MIDDLE_SIDE
-        # elif self.pos_y < -640:
-        #     self.region = RobotRegions.OWN_GOAL
-        # elif self.pos_y < 1100:
-        #     self.region = RobotRegions.MIDDLE
-        # else:
-        #     self.region = RobotRegions.NONE
+        if abs(self.pos_x) > 350:
+            if self.pos_y > 700:
+                self.region = RobotRegions.GOAL_SIDE
+            elif self.pos_y < -640:
+                self.region = RobotRegions.OWN_GOAL_SIDE
+            elif abs(self.pos_x):
+                self.region = RobotRegions.MIDDLE_SIDE
+        elif self.pos_y < -640:
+            self.region = RobotRegions.OWN_GOAL
+        elif self.pos_y < 1100:
+            self.region = RobotRegions.MIDDLE
+        else:
+            self.region = RobotRegions.NONE
 
         self.pos_x, self.pos_y = self.loc.getPosition()
     
     # ----- Actions ----- #
     def move(self):
-        self.avoid_out_of_bounds()
+        # self.avoid_out_of_bounds()
         self.drive.move(self.move_dir, self.move_spd, self.rot_spd)
+
+        # DEBUG
         # self.drive.move(0, 0, self.rot_spd)
 
     def avoid_out_of_bounds(self):
@@ -333,7 +335,7 @@ class Robot:
     def stop_dribbler(self):
         self.dribbler.set_speed(0)
 
-    def yaw_correct(self, target_angle=0.0, max_spd=0.3, speed=1.0, kp=0.001, kd=0.00001, tolerance=2):
+    def yaw_correct(self, target_angle=0.0, max_spd=0.3, speed=1.0, kp=0.002, kd=0.00005, tolerance=2):
         """PD Yaw correction"""
         if self.bot_dir is None:
             self.rot_spd = 0
@@ -341,20 +343,19 @@ class Robot:
 
         error = self.wrap_angle(target_angle - self.bot_dir)
 
+        self.yaw_controller.kp = kp
+        self.yaw_controller.kd = kd
+        self.yaw_controller.max_derivative = 100
+
+        correction = self.yaw_controller.compute(0.0, -error)
+
         if abs(error) < tolerance:
             self.rot_spd = 0
-            self.yaw_error = error
-            self.yaw_error_time = time.monotonic()
-            return self.rot_spd
+        else:
+            self.rot_spd = self.clamp(speed * correction, -abs(max_spd), abs(max_spd))
 
-        now = time.monotonic()
-        dt = now - self.yaw_error_time
-        derivative = (error - self.yaw_error) / dt if dt > 0 else 0
-        derivative = self.clamp(derivative, -100, 100)
-        correction = kp * error + kd * derivative
-        self.rot_spd = self.clamp(speed * correction, -abs(max_spd), abs(max_spd))
         self.yaw_error = error
-        self.yaw_error_time = now
+        self.yaw_error_time = self.yaw_controller.previous_time
         
     def rotate_about_dribbler(self, dir, speed=0.05):
         """Input: dir = 1 for clockwise, 1 for anticlockwise"""
