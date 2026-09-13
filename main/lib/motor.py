@@ -9,6 +9,7 @@ Brushless DC Motor Library ported to python
 import smbus2
 import struct
 import math
+from enum import IntEnum
 
 MAX_SPEED = 546133333
 MAX_TORQUE = 100000
@@ -28,12 +29,18 @@ WHEEL_CIRCUMFERENCE_M = math.pi * WHEEL_DIAMETER_M
 DEFAULT_POLE_PAIRS = 7
 DEFAULT_GEAR_RATIO = 36.0
 
+class CommandMode(IntEnum):
+    TORQUE = 2
+    SPEED = 12
+    POSITION = 13
+    CALIBRATE = 15
+
 def clamp(value, a, b):
     return max(a, min(value, b))
 
 class Motor:
     def __init__(self, address, bus_number: int = 1,
-                 current_limit_FOC: int = 65536 * 2,
+                 current_limit_FOC: int = 65536 * 4,
                  id_PID_constants: tuple[int] = (1500, 200),
                  iq_PID_constants: tuple[int] = (1500, 200),
                  speed_PID_constants: tuple[int] = (0.04, 0.0004, 0.03),
@@ -42,7 +49,6 @@ class Motor:
                  operating_mode_and_sensor: tuple[int] = (3, 1),
                  command_mode: int = 12,
                  max_speed: int = MAX_SPEED,
-                 max_torque: int = MAX_TORQUE,
                  pole_pairs: int = DEFAULT_POLE_PAIRS,
                  gear_ratio: float = DEFAULT_GEAR_RATIO):
         self.i2c_address = address
@@ -50,6 +56,7 @@ class Motor:
         self.QDRformat = QDR_FORMAT_SHORT
         self.pole_pairs = pole_pairs
         self.gear_ratio = gear_ratio
+        self.command_mode = command_mode
 
         # QDR cache, refreshed by update_quick_data_readout()
         self.qdr_position = 0
@@ -65,7 +72,6 @@ class Motor:
         self.set_elec_angle_offset(elec_angle_offset)
         self.set_sin_cos_centre(sin_cos_centre)
         self.set_speed_limit(max_speed)
-        self.max_torque = max_torque
         self.configure_operating_mode_and_sensor(*operating_mode_and_sensor)
         self.configure_command_mode(command_mode)
         self.set_quick_data_readout_format(self.QDRformat)
@@ -106,12 +112,16 @@ class Motor:
             print(f"Error configuring Operating Mode and Sensor: {e}")
 
     def configure_command_mode(self, commandmode):
+        self.command_mode = commandmode
         try:
             self.bus.write_byte_data(self.i2c_address, 0x21, commandmode)
         except Exception as e:
             print(f"Error configuring Command Mode: {e}")
 
     def set_speed_limit(self, speed_limit):
+        if self.command_mode != CommandMode.SPEED:
+            print("Warning: Attempting to set speed limit while not in SPEED command mode.")
+            self.configure_command_mode(CommandMode.SPEED)
         try:
             self.max_speed = abs(speed_limit)
             data = struct.pack("<i", self.max_speed)
@@ -120,8 +130,11 @@ class Motor:
             print(f"Error setting Speed Limit: {e}")
 
     def set_torque(self, torque):
+        if self.command_mode != CommandMode.TORQUE:
+            print("Warning: Attempting to set torque while not in TORQUE command mode.")
+            self.configure_command_mode(CommandMode.TORQUE)
         try:
-            torque = int(self.max_torque * clamp(torque, -1.0, 1.0))
+            torque = int(self.max_current * clamp(torque, -1.0, 1.0))
             data = struct.pack("<i", torque)
             self.bus.write_i2c_block_data(self.i2c_address, 0x11, list(data))
         except Exception as e:
@@ -137,6 +150,7 @@ class Motor:
 
     def set_current_limit_FOC(self, current):
         try:
+            self.max_current = abs(current)
             data = struct.pack("<i", current)
             self.bus.write_i2c_block_data(self.i2c_address, 0x33, list(data))
         except Exception as e:
