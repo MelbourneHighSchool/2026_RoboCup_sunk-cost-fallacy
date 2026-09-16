@@ -73,8 +73,28 @@ class Vision:
         
         hsv = config.get_value("hsv")
         if hsv is not None:
-            self.ball_bounds_v[:] = hsv["ball"]["low"] + hsv["ball"]["high"]
-            self.goal_bounds_v[:] = hsv["bgoal"]["low"] + hsv["bgoal"]["high"] + hsv["ygoal"]["low"] + hsv["ygoal"]["high"]
+            blh = round(hsv["ball"]["low"][0] / 360 * 255)
+            bls = round(hsv["ball"]["low"][1] / 100 * 255)
+            blv = round(hsv["ball"]["low"][2] / 100 * 255)
+            buh = round(hsv["ball"]["high"][0] / 360 * 255)
+            bus = round(hsv["ball"]["high"][1] / 100 * 255)
+            buv = round(hsv["ball"]["high"][2] / 100 * 255)
+            self.ball_bounds_v[:] = (blh, bls, blv, buh, bus, buv)
+
+            bglh = round(hsv["bgoal"]["low"][0] / 360 * 255)
+            bgls = round(hsv["bgoal"]["low"][1] / 100 * 255)
+            bglv = round(hsv["bgoal"]["low"][2] / 100 * 255)
+            bguh = round(hsv["bgoal"]["high"][0] / 360 * 255)
+            bgus = round(hsv["bgoal"]["high"][1] / 100 * 255)
+            bguv = round(hsv["bgoal"]["high"][2] / 100 * 255)
+            yglh = round(hsv["ygoal"]["low"][0] / 360 * 255)
+            ygls = round(hsv["ygoal"]["low"][1] / 100 * 255)
+            yglv = round(hsv["ygoal"]["low"][2] / 100 * 255)
+            yguh = round(hsv["ygoal"]["high"][0] / 360 * 255)
+            ygus = round(hsv["ygoal"]["high"][1] / 100 * 255)
+            yguv = round(hsv["ygoal"]["high"][2] / 100 * 255)
+            
+            self.goal_bounds_v[:] = (bglh, bgls, bglv, bguh, bgus, bguv, yglh, ygls, yglv, yguh, ygus, yguv)
     
     def start(self):
         self.camera.start()
