@@ -160,6 +160,7 @@ int main(){
         } else if (action == 'o'){
             outlock.lock();
             cout << bestX << "\n" << bestY << "\n";
+            cout.flush();
             outlock.unlock();
         } else if (action == 'd'){
             outlock.lock();

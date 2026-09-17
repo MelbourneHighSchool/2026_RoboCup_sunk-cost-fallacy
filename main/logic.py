@@ -9,6 +9,7 @@ from lib.localize import Localizer
 from lib.tof import ToF
 from lib.switch import Switch
 from lib.PDcontroller import PDController
+from lib.break_beam import BreakBeam
 
 import time
 import cv2
@@ -29,6 +30,10 @@ class RobotRegions(Enum):
     OWN_GOAL = 4
     OWN_GOAL_SIDE = 5
 
+class AttackStates(Enum):
+    DEFAULT = 0
+    BALL_HIDING = 1
+
 class Robot:
     def __init__(self, drive=None, imu=None, config=None):
 
@@ -40,7 +45,7 @@ class Robot:
         self.kicker = Kicker(SOLENOID_PIN, PULSE_S)
         self.dribbler = Dribbler(self.config)
         self.tofs = (ToF(0x50), ToF(0x51), ToF(0x52), ToF(0x53), ToF(0x54), ToF(0x55), ToF(0x56), ToF(0x5f))
-
+        self.breakbeam = BreakBeam(board.D14)
         # Switches
         switches = self.config.get_value("switches")
 
@@ -53,6 +58,8 @@ class Robot:
         # Ball
         self.see_ball = False
         self.have_ball = False
+        self.last_possession_time = None
+        self.POSSESSION_TIMEOUT = 0.5
         self.ball_dir = None
         self.ball_dist = None
         self.last_ball_dir = None
@@ -89,8 +96,12 @@ class Robot:
     
     def main_loop(self):
         self.update_stuff()
+        self.dribble()
+        
 
-        # self.attack_loop()
+
+        self.attack_loop()  
+
         # self.defence_loop()
 
         self.move()   
@@ -98,27 +109,81 @@ class Robot:
         # DEBUG
         # print(self.ball_dir, self.ball_dist, self.have_ball)
         # print(self.goal_dir, self.goal_ang_width, self.goal_dist)
+
         # print(self.own_goal_dir, self.own_goal_dist)
-        print(self.pos_x, self.pos_y)
+        # print(self.pos_x, self.pos_y)
+        # print(self.region)
+        # print(self.have_ball)
         
     
     def attack_loop(self):
-        if not self.have_ball:
-            if self.see_goal:
-                angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.25
-                self.yaw_correct(self.to_absolute_dir(angle))
-
         if self.have_ball:
-            self.move_dir = 0
-            self.move_spd = 0.3
-            self.kick()
+            self.rot_spd = 0
+            self.possession_behaviour()
 
         elif self.see_ball:
             self.ball_capture()
-        else:
-            self.move_spd = 0.03
-            self.move_dir = -180
+            if self.region == RobotRegions.MIDDLE or self.region == RobotRegions.MIDDLE_SIDE:
+                if self.see_goal:
+                    angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.25
+                    self.yaw_correct_relative(angle)
+            # else:
+            #     self.yaw_correct_relative(self.ball_dir)
+            #     self.move_spd = 0.03
+            #     self.move_dir = self.ball_dir
 
+    def ball_hide(self):
+        self.yaw_correct(np.sign(self.pos_x) * 90, speed=0.1, max_spd = 0.03)
+
+        if self.pos_y > 500:
+            self.rotate_towards_goal()
+        elif 80 < abs(self.bot_dir) < 100:
+            if abs(self.pos_x) < 450:
+                self.move_dir = self.to_relative_dir(90 * np.sign(self.pos_x))
+                self.move_spd = 0.03
+            else:
+                self.move_dir = self.to_relative_dir(0)
+                self.move_spd = 0.03
+        else:
+            self.move_spd = 0
+        
+        # if not self.have_ball:
+        #     if self.see_goal:
+        #         angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.25
+        #         self.yaw_correct_relative(angle)
+
+        # if self.have_ball:
+        #     self.move_dir = 0
+        #     self.move_spd = 0.3
+        #     self.kick()
+
+        # elif self.see_ball:
+        #     self.ball_capture()
+        # else:
+        #     self.move_spd = 0.03
+        #     self.move_dir = -180
+
+    def possession_behaviour(self):
+        
+        if self.region == RobotRegions.GOAL_SIDE:
+            self.move_dir = 180
+            self.move_spd = 0.02
+        elif self.see_goal:
+            self.rotate_towards_goal()
+        else:
+            self.move_spd = 0
+            self.rot_spd = 0
+
+        if self.ready_to_shoot():
+            self.kick()  
+
+    def rotate_towards_goal(self):
+        self.rotate_about_dribbler(np.sign(self.goal_dir), 0.02)
+        # self.rot_spd = 0.01 * np.sign(self.goal_dir)
+
+    def ready_to_shoot(self):
+        return self.have_ball and self.see_goal and abs(self.goal_dir) < 0.7 * self.goal_ang_width
+    
     def defence_loop(self):
         KEEP_DIST = 50
         TOLERANCE = 5
@@ -186,18 +251,19 @@ class Robot:
 
     def ball_capture(self):
         MOVE_FORWARD_ANGLE = 35  # ±
-        ORBIT_RADIUS = 85
-        SPD_MAX = 0.3
+        ORBIT_RADIUS = 90
+        SPD_MAX = 0.5
         SPD_MIN = 0.05
 
-        base_speed = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.05, 80)
+        self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.05, 85)
 
-        if abs(self.ball_dir) < 10:
+        if abs(self.ball_dir) < 8:
             self.move_dir = self.ball_dir
             self.move_spd = SPD_MAX
             return
         elif abs(self.ball_dir) < MOVE_FORWARD_ANGLE:
-            self.move_dir = self.ball_dir * 2.3
+            self.move_dir = self.ball_dir * 3
+            self.move_spd = 0.1
         elif self.ball_dist <= ORBIT_RADIUS:
             distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
             orbit_angle = 90 + distance_ratio * 90
@@ -223,8 +289,14 @@ class Robot:
             self.ball_dir = None
             self.ball_dist = None
 
-        # Possession detection
-        self.have_ball = self.see_ball and self.ball_dist < 40 and -7 < self.ball_dir < 7
+        now = time.monotonic()
+        if self.breakbeam.read():
+            self.last_possession_time = now
+
+        self.have_ball = (
+            self.last_possession_time is not None
+            and now - self.last_possession_time < self.POSSESSION_TIMEOUT
+        )
 
     def update_goal_info(
             self,
@@ -259,9 +331,14 @@ class Robot:
         # IMU
         self.bot_dir = self.wrap_angle(self.imu.get_yaw())
 
-        # Region
-        if abs(self.pos_x) > 350:
-            if self.pos_y > 700:
+        # Localisation
+        self.pos_x, self.pos_y = self.loc.getPosition()
+
+        # Region divisions
+        if self.pos_x is None or self.pos_y is None:
+            self.region = RobotRegions.NONE
+        elif abs(self.pos_x) > 350:
+            if self.pos_y > 665:
                 self.region = RobotRegions.GOAL_SIDE
             elif self.pos_y < -640:
                 self.region = RobotRegions.OWN_GOAL_SIDE
@@ -274,7 +351,6 @@ class Robot:
         else:
             self.region = RobotRegions.NONE
 
-        self.pos_x, self.pos_y = self.loc.getPosition()
     
     # ----- Actions ----- #
     def move(self):
@@ -285,8 +361,8 @@ class Robot:
         # self.drive.move(0, 0, self.rot_spd)
 
     def avoid_out_of_bounds(self):
-        BOUND_LINE_X = 450 + 10     # mm, ±
-        BOUND_LINE_Y = 650 + 10     # mm, ±
+        BOUND_LINE_X = 450 + 100     # mm, ±
+        BOUND_LINE_Y = 650 + 100     # mm, ±
         START_SLOWDOWN_X_DIST = 50
         START_SLOWDOWN_Y_DIST = 50
         AVOID_WALL_SPD = 0.01
@@ -330,7 +406,7 @@ class Robot:
         self.kicker.kick()
 
     def dribble(self):
-        self.dribbler.set_speed(-0.1)
+        self.dribbler.set_speed(-1)
     
     def stop_dribbler(self):
         self.dribbler.set_speed(0)
@@ -356,7 +432,25 @@ class Robot:
 
         self.yaw_error = error
         self.yaw_error_time = self.yaw_controller.previous_time
-        
+
+    def yaw_correct_relative(self, relative_angle, max_spd=0.3, speed=1.0, kp=0.002, kd=0.00005, tolerance=2):
+            error = self.wrap_angle(relative_angle)
+    
+            self.yaw_controller.kp = kp
+            self.yaw_controller.kd = kd
+            self.yaw_controller.max_derivative = 100
+    
+            correction = self.yaw_controller.compute(0.0, -error)
+    
+            if abs(error) < tolerance:
+                self.rot_spd = 0
+            else:
+                self.rot_spd = self.clamp(
+                    speed * correction,
+                    -abs(max_spd),
+                    abs(max_spd),
+                )
+
     def rotate_about_dribbler(self, dir, speed=0.05):
         """Input: dir = 1 for clockwise, 1 for anticlockwise"""
         RATIO_CONSTANT = 1 # 1 happened to work
@@ -410,6 +504,10 @@ class Robot:
     def lerp(self, value, input_min, input_max, output_min, output_max):
         return self.clamp(output_min + (value - input_min) * (output_max - output_min) / (input_max - input_min), output_min, output_max)
 
+    def angle_towards(self, bot_x, bot_y, obj_x, obj_y):
+        return self.wrap_angle(math.degrees(math.atan2(obj_x - bot_x, obj_y - bot_y)))
+        
+
 # -----------------------------------------------------------------------------------------------------------
 
 # Main script
@@ -454,9 +552,10 @@ while True:
             robot.imu.yaw_offset = robot.imu.get_yaw()
             robot.target_goal_is_blue = robot.goal_switch.read()
             print("===\nTarget: " + ("Blue goal" if robot.target_goal_is_blue else "Yellow goal") + "\n===")
-
         # Ball
+
         bangle, bdist, bx, by, br = vision.ball_info
+
 
         # Blue goal
         (
@@ -493,7 +592,7 @@ while True:
 
             # Send frame
             server.send_frame(frame)
-        
+
         # Update robot stuff
         robot.update_ball_info(bangle, bdist)
         robot.update_goal_info(
@@ -506,7 +605,6 @@ while True:
         )
 
         robot.main_loop()
-        
     except KeyboardInterrupt:
         break
 

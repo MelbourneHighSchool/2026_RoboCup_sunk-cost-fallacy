@@ -49,11 +49,14 @@ class Localizer:
         with self.cppIOLock:
             self.cppModule.stdin.write("o\n")
             self.cppModule.stdin.flush()
+
         x, y = self.cppModule.stdout.readline(), self.cppModule.stdout.readline()
+
         x = float(x[:-1])
         y = float(y[:-1])
         # bearing = degrees(float(output[1][:-1]))
         # sensor_data = output[2]
+        
         return (x, y)
     def printDebug(self):
         with self.cppIOLock:
