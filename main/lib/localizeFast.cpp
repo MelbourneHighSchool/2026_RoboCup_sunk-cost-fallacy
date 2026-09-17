@@ -173,8 +173,8 @@ int main(){
     //main loop handles io. boring, don't want to annotate
     targetAngle = 0;
     for (int i = 0; i < 8; i++){
-        targetDists[i] = 0;
-        badToF[i] = false;
+        targetDists[i] = 50;
+        badToF[i] = true;
     }
     cin.tie(nullptr);
     ios_base::sync_with_stdio(false);
