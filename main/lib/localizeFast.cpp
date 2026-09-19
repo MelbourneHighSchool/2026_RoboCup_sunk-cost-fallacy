@@ -212,6 +212,7 @@ int main(){
         } else if (action == 'o'){
             outlock.lock();
             cout << bestX << "\n" << bestY << "\n";
+            cout.flush();
             outlock.unlock();
             cout.flush();
         } else if (action == 'd'){
