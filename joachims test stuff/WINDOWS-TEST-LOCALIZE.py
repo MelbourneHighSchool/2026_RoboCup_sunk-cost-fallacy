@@ -12,7 +12,6 @@ sensorData = []
 with open(progPath + "/tof data.txt", "r") as file:
     for line in file.readlines():
         _, _, imuString, tofString, _ = line.strip().split(",")
-        print(tofString, imuString)
         a = []
         for v in tofString.strip().removeprefix("'").removesuffix("\\n'").strip().split(" "):
             a.append(int(v))
@@ -33,25 +32,41 @@ process = subprocess.Popen(
 dataIdx = 0
 process.stdin.write("i 8 0\n")
 process.stdin.flush()
+fRect = pg.rect.Rect(cvtPoint(pg.Vector2(-910, -1215)), pg.Vector2(1820/8, 2430/8))
+g1Rect = pg.rect.Rect(cvtPoint(pg.Vector2(-225, -1215)), pg.Vector2(450/8, 226/8))
+g2Rect = pg.rect.Rect(cvtPoint(pg.Vector2(-225, 988)), pg.Vector2(450/8, 226/8))
+
+debug = [[],[],0]
 try:
     while True:
         for e in pg.event.get():
             if e.type == pg.QUIT:
                 raise SystemExit
-        dis.fill((50,150,100))
         print(sensorData[dataIdx][1])
-        process.stdin.write(f"i {i} {d}\n")
+        process.stdin.write(f"o\nd\n")
         process.stdin.flush()
-        pos = pg.Vector2((process.stdout.readline(), process.stdout.readline()))
+        pos = pg.Vector2((int(process.stdout.readline()), int(process.stdout.readline())))
+        for i in range(3):
+            debug[i] = process.stdout.readline().split(" ")
+        dis.fill((20,20,20))
+        pg.draw.rect(dis,(33,100,67),fRect)
+        pg.draw.rect(dis,(255,255,0),g1Rect)
+        pg.draw.rect(dis,(0,255,255),g2Rect)
+        for p in [ (225,  1215,   940),   # top goal, right post
+                    (-225, 1215,   940),   # top goal, left post
+                    (225, -1215,  -940),   # bottom goal, right post
+                    (-225,-1215,  -940),   # bottom goal, left post
+                ]:
+            pg.draw.line(dis,(20,20,20),cvtPoint(pg.Vector2(p[0],p[1])),cvtPoint(pg.Vector2(p[0],p[2])))
         for i, d in enumerate(sensorData[dataIdx][0]):
-            print(i)
+            
             process.stdin.write(f"i {i} {d}\n")
             process.stdin.flush()
             a = (pi * i / 4) - sensorData[dataIdx][1]
             pg.draw.aaline(dis, 
-                            hsv_to_rgb(i/8,1,1),
-                            cvtPoint(pg.Vector2(0,0)),
-                            cvtPoint(pg.Vector2(sin(a),cos(a)) * d)
+                            (255,255,255) if debug[1][i] == "0" else (255,0,0),  #hsv_to_rgb(360 * i / 8,255,255),
+                            cvtPoint(pos),
+                            cvtPoint(pos + pg.Vector2(sin(a),cos(a)) * d)
                           )
                             
         pg.display.flip()

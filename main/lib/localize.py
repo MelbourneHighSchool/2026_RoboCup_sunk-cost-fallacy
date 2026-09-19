@@ -62,9 +62,9 @@ class Localizer:
         with self.cppIOLock:
             self.cppModule.stdin.write("d\n")
             self.cppModule.stdin.flush()
-        print((self.cppModule.stdout.readline(), self.cppModule.stdout.readline()),\
-                    self.cppModule.stdout.readline(), self.cppModule.stdout.readline(),\
-                    self.cppModule.stdout.readline(), sep = "\n", end = "\n\n")
+        for i in range(3):
+            print(self.cppModule.stdout.readline().strip())
+        print()
 if __name__ == "__main__":
     loc = Localizer([1,2,3,4,5,6,7,8], "imu") # TODO TODO TODO
 
