@@ -56,10 +56,10 @@ class Camera:
         self.camera = picamera2.Picamera2()
         cfg = self.camera.video_configuration
         cfg.main.format = "RGB888"
-        cfg.raw.size = (2304, 1296)
+        cfg.raw.size = (1536, 864)
         cfg.main.size = size
         cfg.buffer_count = 3
-        cfg.controls.FrameRate = 56.8
+        cfg.controls.FrameRate = 100
 
         self.camera.configure(cfg)
         self.camera.pre_callback = self._camera_callback
@@ -100,7 +100,7 @@ class Camera:
     
     def start(self):
         self.camera.start()
-        self.camera.set_controls({"AfMode": controls.AfModeEnum.Manual, "LensPosition": 32.0})
+        self.camera.set_controls({"AfMode": controls.AfModeEnum.Manual, "LensPosition": 50.0})
     
     def stop(self, terminate=False):
         self.camera.stop()
