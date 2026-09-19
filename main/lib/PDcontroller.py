@@ -2,13 +2,14 @@ import time
 
 # No I for now
 class PDController:
-    def __init__(self, kp: float = 0.0, kd: float = 0.0, max_derivative=500):
+    def __init__(self, kp: float = 0.0, kd: float = 0.0, max_derivative=500, debug: bool = False):
         # Initialise
         self.kp = kp
         self.kd = kd
         self.previous_error = 0.0
         self.previous_time = None
         self.max_derivative = max_derivative # Maximum absolute value of the derivative term
+        self.debug = debug
 
     def compute(self, setpoint: float, measurement: float) -> float:
         current_time = time.monotonic()
@@ -29,7 +30,11 @@ class PDController:
         else:
             derivative = 0.0
         
-        d_term = self.kd * self.clamp(derivative, -self.max_derivative, self.max_derivative) # Limit derivative so that for yaw correction, when the angle switches from -180 to 180, correction speed doesn't become too slow
+        clamped_derivative = self.clamp(derivative, -self.max_derivative, self.max_derivative)
+        d_term = self.kd * clamped_derivative # Limit derivative so that for yaw correction, when the angle switches from -180 to 180, correction speed doesn't become too slow
+
+        if self.debug:
+            print(f"PD debug: error={error:.4f}, p={p_term:.6f}, d={d_term:.6f}, total={p_term + d_term:.6f}")
         
         # Save state for next step
         self.previous_error = error
