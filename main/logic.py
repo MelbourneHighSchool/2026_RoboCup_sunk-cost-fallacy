@@ -24,31 +24,27 @@ PULSE_S = 0.02
 
 # -----------------------------------------------------------------------------------------------------------
 class AttackStates(Enum):
+    # Unused atm
     DEFAULT = 0
     BALL_HIDING = 1
     PULL_BALL_FROM_GOAL_SIDE = 2
     PULL_BALL_FROM_OWN_GOAL_SIDE = 3
     CATCH_BALL_ON_SIDE = 4
 
-class RecentCondition:
-    def __init__(self, true_threshold, num=12, min_samples=3):
-        self.dq = deque(maxlen=num)
-        self.true_threshold = true_threshold
+class RecentValues:
+    def __init__(self, num=12, min_samples=3):
+        self.values = deque(maxlen=num)
         self.min_samples = min_samples
-        self.state = False
 
-    def update(self, condition):
-        self.dq.append(bool(condition))
+    def update(self, new_value):
+        self.values.append(new_value)
 
-        if len(self.dq) < self.min_samples:
-            return self.state
+    def check(self, condition, true_threshold):
+        if len(self.values) < self.min_samples:
+            return False  # not enough data yet
 
-        percent_true = sum(self.dq) / len(self.dq)
-
-        if percent_true >= self.true_threshold:
-            self.state = True
-
-        return self.state
+        percent_true = sum(condition(v) for v in self.values) / len(self.values)
+        return percent_true >= true_threshold
     
 # -----------------------------------------------------------------------------------------------------------
 
@@ -72,6 +68,9 @@ class Robot:
 
         run_conf = switches.get("run")
         self.run_switch = Switch(str(run_conf["pin"]), run_conf["on_high"])
+
+        # State machine
+        self.state = AttackStates.DEFAULT
 
         # Flags
         self.ENABLE_BALL_HIDING = False
@@ -113,7 +112,12 @@ class Robot:
         self.yaw_controller = PDController(kp=0.001, kd=0.00001, max_derivative=100, debug=False)
         self.yaw_controller.previous_error = self.yaw_error
         self.yaw_controller.previous_time = self.yaw_error_time
-        self.ball_spd_x_controller = PDController(kp=0.0004, kd=0.00001, max_derivative=100, debug=False)
+
+        self.loc_x_record = RecentValues(num=12, min_values=3)
+        self.loc_y_record = RecentValues(num=12, min_values=3)
+        self.is_at_goal_side = False
+        self.is_at_own_goal_side = False
+        self.is_at_middle_side = False
         
     # ----- Main ----- #
 
@@ -133,24 +137,32 @@ class Robot:
         # print(self.goal_dir, self.goal_ang_width, self.goal_dist)
         # print(self.own_goal_dir, self.own_goal_dist)
         # print(self.region)
-        print(self.pos_x, self.pos_y)
+        # print(self.pos_x, self.pos_y)
     
     # ----- Offence ----- #
 
     def attack_loop(self):
         if self.have_ball:
-            self.rot_spd = 0
             self.possession_behaviour()
         elif self.see_ball:
-            if self.goal_side:
-                print("Goal side")
+            # Trying to gain possession of ball
+            if self.is_at_middle_side:
                 self.yaw_correct()
                 self.ball_capture(soft=True)
-            elif self.see_goal:
+            elif self.is_at_own_goal_side:
+                self.yaw_correct_relative(self.ball_dir)
+                self.ball_capture(soft=True)
+            elif self.is_at_goal_side:
+                self.yaw_correct_relative(self.ball_dir)
+                self.ball_capture(soft=True)
+            else:
                 self.yaw_correct_towards_goal()
                 self.ball_capture()
-            else:
-                self.rot_spd = 0
+        else:
+            # If no ball seen, move towards (0, -150)
+            self.stop_dribbler()
+            self.yaw_correct()
+            self.move_dir = self.to_relative_dir(self.angle_towards(0, -150))
     
     def ball_capture(self, soft=False):
         MOVE_FORWARD_ANGLE = 30  # ±
@@ -188,15 +200,18 @@ class Robot:
             self.rot_spd = 0
 
     def ball_hide(self, yaw=90):
-        
 
-        if self.pos_y > 500 and self.see_goal:
-            self.rotate_towards_goal()
-            self.mvoe_spd = 0
-            return
+        if self.pos_y > 500:
+            if self.see_goal:
+                self.rotate_towards_goal()
+                self.move_spd = 0
+                return
+            else:
+                self.move_spd = 0.03
+                self.move_dir = self.to_relative_dir(self.angle_towards(0, 500))
         else:
-            self.yaw_correct(np.sign(self.pos_x) * yaw, speed=0.1, max_spd = 0.03)
-            
+            self.yaw_correct(np.sign(self.pos_x) * yaw, speed=0.1, max_spd=0.03)
+
         if yaw - 10 < abs(self.bot_dir) < yaw + 10:
             if abs(self.pos_x) < 450:
                 self.move_dir = self.to_relative_dir(90 * np.sign(self.pos_x))
@@ -223,9 +238,8 @@ class Robot:
             return
         
         if not self.see_own_goal:
-            self.rot_spd = 0
-            self.move_spd = 0
-            return
+            self.rot_dir = 0
+            self.move_dir = self.to_relative_dir(self.angle_towards(0, -400))
 
         if self.see_ball and abs(self.to_absolute_dir(self.own_goal_dir)) < 90 and abs(self.to_absolute_dir(self.ball_dir)) > 90:
             return
@@ -284,7 +298,16 @@ class Robot:
 
         # Localisation
         self.pos_x, self.pos_y = self.loc.getPosition()
+        self.loc_x_record.update(self.pos_x)
+        self.loc_y_record.update(self.pos_y)
 
+        is_on_side = self.loc_x_record.check(lambda x: abs(x) > 350, 0.8) # True if at least 80% of recent values are say that the bot is on the side of the field
+        is_at_goal_y = self.loc_y_record.check(lambda y: y > 650, 0.8)
+        is_at_own_goal_y = self.loc_y_record.check(lambda y: y < -650, 0.8)
+
+        self.is_at_goal_side = is_on_side and is_at_goal_y
+        self.is_at_own_goal_side = is_on_side and is_at_own_goal_y
+        self.is_at_middle_side = is_on_side and not is_at_goal_y and not is_at_own_goal_y
 
     def update_ball_info(self, ball_dir, ball_dist):
             self.see_ball = True
@@ -513,6 +536,7 @@ class Robot:
         return self.clamp(output_min + (value - input_min) * (output_max - output_min) / (input_max - input_min), output_min, output_max)
 
     def angle_towards(self, obj_x, obj_y):
+        """Returns the ABSOLUTE direction towards a coordinate on a field."""
         return self.wrap_angle(math.degrees(math.atan2(obj_x - self.pos_x, obj_y - self.pos_y)))   
 
 # -----------------------------------------------------------------------------------------------------------
