@@ -17,23 +17,40 @@ import numpy as np
 import math
 import board
 from enum import Enum
+from collections import deque
 
 SOLENOID_PIN = board.D21
 PULSE_S = 0.02
 
 # -----------------------------------------------------------------------------------------------------------
-class FieldRegions(Enum):
-    NONE = 0
-    GOAL_SIDE = 1
-    MIDDLE = 2
-    MIDDLE_SIDE = 3
-    OWN_GOAL = 4
-    OWN_GOAL_SIDE = 5
-
 class AttackStates(Enum):
-    # Unused atm
     DEFAULT = 0
     BALL_HIDING = 1
+    PULL_BALL_FROM_GOAL_SIDE = 2
+    PULL_BALL_FROM_OWN_GOAL_SIDE = 3
+    CATCH_BALL_ON_SIDE = 4
+
+class RecentCondition:
+    def __init__(self, true_threshold, num=12, min_samples=3):
+        self.dq = deque(maxlen=num)
+        self.true_threshold = true_threshold
+        self.min_samples = min_samples
+        self.state = False
+
+    def update(self, condition):
+        self.dq.append(bool(condition))
+
+        if len(self.dq) < self.min_samples:
+            return self.state
+
+        percent_true = sum(self.dq) / len(self.dq)
+
+        if percent_true >= self.true_threshold:
+            self.state = True
+
+        return self.state
+    
+# -----------------------------------------------------------------------------------------------------------
 
 class Robot:
     def __init__(self, drive=None, imu=None, config=None):
@@ -61,15 +78,16 @@ class Robot:
 
         # Ball
         self.see_ball = False
-        self.have_ball = False
-        self.last_possession_time = None
-        self.POSSESSION_TIMEOUT = 0.2
         self.ball_dir = None
         self.ball_dist = None
         self.last_ball_dir = None
         self.last_ball_dist = None
         self.last_ball_see_time = 0
-        self.CHASE_BALL_TIMEOUT = 0.4
+        self.BALL_DIR_TIMEOUT = 0.8
+
+        self.have_ball = False
+        self.last_possession_time = None
+        self.POSSESSION_TIMEOUT = 0.2
 
         # Goal
         self.target_goal_is_blue = False
@@ -102,11 +120,12 @@ class Robot:
     def main_loop(self):
         self.update_stuff()
 
-        self.goal_side = (not self.see_goal or abs(self.to_absolute_dir(self.goal_dir)) > 65)
-        print(self.goal_side)
-
         self.attack_loop()
         # self.defence_loop()
+
+        if self.is_ready_to_shoot():
+            self.kick() # Kick if there is a line of shot regardless of role
+
         self.move()
 
         # DEBUG
@@ -123,7 +142,7 @@ class Robot:
             self.rot_spd = 0
             self.possession_behaviour()
         elif self.see_ball:
-            if False and self.goal_side:
+            if self.goal_side:
                 print("Goal side")
                 self.yaw_correct()
                 self.ball_capture(soft=True)
@@ -158,71 +177,27 @@ class Robot:
             self.stop_dribbler()
             self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS/self.ball_dist)), self.ball_dir)
 
-    def ball_capture_2(self):
-        ORBIT_RADIUS = 57
-        SPD_MAX = 0.25
-        SPD_MIN = 0
-        FORWARD_HALF_WIDTH = 0.3
-        ALIGNMENT_TOLERANCE = 0.01
-
-        alignment = abs(math.sin(math.radians(self.ball_dir)))
-
-        if abs(alignment) < FORWARD_HALF_WIDTH and abs(self.ball_dir) < 90:
-            self.dribble()
-            pd_output = self.ball_spd_x_controller.compute(0, self.ball_pos_x)
-
-            if alignment < ALIGNMENT_TOLERANCE:
-                move_vec_x = 0
-            else:
-                move_vec_x = pd_output
-
-            move_vec_y = 0.2 * (math.sqrt(self.ball_dist * FORWARD_HALF_WIDTH) - math.sqrt(abs(self.ball_pos_x)))
-            move_vec_y = alignment - self.ball_pos_x
-
-            self.move_spd = 0.1 * math.hypot(move_vec_x, move_vec_y)
-
-            self.move_dir = self.wrap_angle(math.degrees(math.atan2(-move_vec_x, move_vec_y)))
-
-
-        elif self.ball_dist <= ORBIT_RADIUS:
-            self.stop_dribbler()
-            distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
-            orbit_angle = 90 + distance_ratio * 90
-            self.move_dir = self.ball_dir + np.copysign(orbit_angle, self.ball_dir)
-
-            self.move_spd = SPD_MAX
-
-        else:
-            self.stop_dribbler()
-            self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS/self.ball_dist)), self.ball_dir)
-            self.move_spd = SPD_MAX
-        
-        self.move_spd = self.clamp(self.move_spd, SPD_MIN, SPD_MAX)
-
     def possession_behaviour(self):
         self.dribble()
-        if self.is_ready_to_shoot():
-            pass
-            self.kick()  
-        elif self.see_goal and not self.goal_side:
+
+        if self.see_goal and not self.goal_side:
             self.move_spd = 0
             self.rotate_towards_goal()
-        elif self.goal_side:
-            self.move_dir = self.to_relative_dir(180)
-            self.move_spd = 0.02
-            print("AAA")
         else:
             self.move_spd = 0
             self.rot_spd = 0
-    
-            
 
-    def ball_hide(self):
-        self.yaw_correct(np.sign(self.pos_x) * 90, speed=0.1, max_spd = 0.03)
+    def ball_hide(self, yaw=90):
+        
 
-        if self.pos_y > 500:
+        if self.pos_y > 500 and self.see_goal:
             self.rotate_towards_goal()
-        elif 80 < abs(self.bot_dir) < 100:
+            self.mvoe_spd = 0
+            return
+        else:
+            self.yaw_correct(np.sign(self.pos_x) * yaw, speed=0.1, max_spd = 0.03)
+            
+        if yaw - 10 < abs(self.bot_dir) < yaw + 10:
             if abs(self.pos_x) < 450:
                 self.move_dir = self.to_relative_dir(90 * np.sign(self.pos_x))
                 self.move_spd = 0.03
@@ -231,22 +206,6 @@ class Robot:
                 self.move_spd = 0.03
         else:
             self.move_spd = 0
-        
-        # if not self.have_ball:
-        #     if self.see_goal:
-        #         angle = np.sign(self.goal_dir) * (abs(self.goal_dir))**1.25
-        #         self.yaw_correct_relative(angle)
-
-        # if self.have_ball:
-        #     self.move_dir = 0
-        #     self.move_spd = 0.3
-        #     self.kick()
-
-        # elif self.see_ball:
-        #     self.ball_capture()
-        # else:
-        #     self.move_spd = 0.03
-        #     self.move_dir = -180
 
     def is_ready_to_shoot(self):
         return self.have_ball and self.see_goal and abs(self.goal_dir) < 0.7 * self.goal_ang_width
@@ -326,22 +285,6 @@ class Robot:
         # Localisation
         self.pos_x, self.pos_y = self.loc.getPosition()
 
-        # Region divisions
-        if self.pos_x is None or self.pos_y is None:
-            self.region = FieldRegions.NONE
-        elif abs(self.pos_x) > 350:
-            if self.pos_y > 665:
-                self.region = FieldRegions.GOAL_SIDE
-            elif self.pos_y < -640:
-                self.region = FieldRegions.OWN_GOAL_SIDE
-            elif abs(self.pos_x):
-                self.region = FieldRegions.MIDDLE_SIDE
-        elif self.pos_y < -640:
-            self.region = FieldRegions.OWN_GOAL
-        elif self.pos_y < 1100:
-            self.region = FieldRegions.MIDDLE
-        else:
-            self.region = FieldRegions.NONE
 
     def update_ball_info(self, ball_dir, ball_dist):
             self.see_ball = True
@@ -354,7 +297,7 @@ class Robot:
                 self.last_ball_dist = self.ball_dist
                 
                 self.last_ball_see_time = time.monotonic()
-            elif time.monotonic() - self.last_ball_see_time < self.CHASE_BALL_TIMEOUT:
+            elif time.monotonic() - self.last_ball_see_time < self.BALL_DIR_TIMEOUT:
                 self.ball_dir = self.last_ball_dir
                 self.ball_dist = self.last_ball_dist
             else:
@@ -476,37 +419,37 @@ class Robot:
         self.yaw_error_time = self.yaw_controller.previous_time
 
     def yaw_correct_relative(self, relative_angle, max_spd=0.3, speed=1.0, kp=0.002, kd=0.00005, tolerance=2):
-            error = self.wrap_angle(relative_angle)
-    
-            self.yaw_controller.kp = kp
-            self.yaw_controller.kd = kd
-            self.yaw_controller.max_derivative = 100
-    
-            correction = self.yaw_controller.compute(0.0, -error)
-    
-            if abs(error) < tolerance:
-                self.rot_spd = 0
-            else:
-                self.rot_spd = self.clamp(
-                    speed * correction,
-                    -abs(max_spd),
-                    abs(max_spd),
-                )
+        error = self.wrap_angle(relative_angle)
 
-    def rotate_about_dribbler(self, dir, speed=0.05):
-        """Input: dir = 1 for clockwise, 1 for anticlockwise"""
-        RATIO_CONSTANT = 1 # 1 happened to work
-        self.rot_spd = speed * dir
-        self.move_dir = -1 * np.sign(dir) * 90
-        self.move_spd = RATIO_CONSTANT * speed
+        self.yaw_controller.kp = kp
+        self.yaw_controller.kd = kd
+        self.yaw_controller.max_derivative = 100
+
+        correction = self.yaw_controller.compute(0.0, -error)
+
+        if abs(error) < tolerance:
+            self.rot_spd = 0
+        else:
+            self.rot_spd = self.clamp(speed * correction, -abs(max_spd), abs(max_spd))
+
+    def rotate_about_dribbler(self, speed=0.05):
+        """Input: sign(speed) = 1 for clockwise, 1 for anticlockwise"""
+        self.rot_spd = speed
+        self.move_dir = np.sign(speed) * -90
+        self.move_spd = 1 * abs(speed) # 1 happened to be the ratio that works
 
     def rotate_towards_goal(self):
-        self.rotate_about_dribbler(np.sign(self.goal_dir), 0.025)
-        # self.rot_spd = 0.01 * np.sign(self.goal_dir)
+        if self.see_goal:
+            self.rotate_about_dribbler(np.sign(self.goal_dir), 0.025)
+            # self.rot_spd = 0.01 * np.sign(self.goal_dir)
+        else:
+            print("rotate_towards_goal is being called when goal is not visible")
 
     def yaw_correct_towards_goal(self):
         if self.see_goal:
             self.yaw_correct_relative(np.sign(self.goal_dir) * (abs(self.goal_dir))**1.32)
+        else:
+            print("yaw_correct_towards_goal is being called when goal is not visible")
     
     def yaw_correct_line_of_shot(self):
         if self.see_goal and self.see_ball:
@@ -517,6 +460,8 @@ class Robot:
             yaw_vec_y = self.goal_pos_y - self.ball_pos_y
             yaw = math.degrees(math.atan2(yaw_vec_x, yaw_vec_y))
             self.yaw_correct_relative(yaw * 1)
+        else:
+            print("yaw_correct_line_of_shot is being called when goal or ball is not visible")
 
     # ----- Helper functions ----- #
 
@@ -553,7 +498,7 @@ class Robot:
     def approx_real_dist(pixel_dist):
         """
         Input: Distance from centre of camera in pixels
-        Output: pproximate real distance in mm
+        Output: approximate real distance in mm
         
         PLEASE DON'T CHANGE THIS FUNCTION BECAUSE MANY CONSTANTS ARE BASED ON THIS
         """
@@ -567,8 +512,8 @@ class Robot:
     def lerp(self, value, input_min, input_max, output_min, output_max):
         return self.clamp(output_min + (value - input_min) * (output_max - output_min) / (input_max - input_min), output_min, output_max)
 
-    def angle_towards(self, bot_x, bot_y, obj_x, obj_y):
-        return self.wrap_angle(math.degrees(math.atan2(obj_x - bot_x, obj_y - bot_y)))   
+    def angle_towards(self, obj_x, obj_y):
+        return self.wrap_angle(math.degrees(math.atan2(obj_x - self.pos_x, obj_y - self.pos_y)))   
 
 # -----------------------------------------------------------------------------------------------------------
 

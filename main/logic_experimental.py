@@ -21,13 +21,15 @@ SOLENOID_PIN = board.D21
 PULSE_S = 0.02
 
 # -----------------------------------------------------------------------------------------------------------
-class RobotRegions(Enum):
+class FieldRegions(Enum):
     NONE = 0
     GOAL_SIDE = 1
     MIDDLE = 2
     MIDDLE_SIDE = 3
     OWN_GOAL = 4
     OWN_GOAL_SIDE = 5
+
+
 
 class Robot:
     def __init__(self, drive=None, imu=None, config=None):
@@ -211,6 +213,47 @@ class Robot:
         else:
             self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS/self.ball_dist)), self.ball_dir)
 
+    def ball_capture_2(self):
+        ORBIT_RADIUS = 57
+        SPD_MAX = 0.25
+        SPD_MIN = 0
+        FORWARD_HALF_WIDTH = 0.3
+        ALIGNMENT_TOLERANCE = 0.01
+
+        alignment = abs(math.sin(math.radians(self.ball_dir)))
+
+        if abs(alignment) < FORWARD_HALF_WIDTH and abs(self.ball_dir) < 90:
+            self.dribble()
+            pd_output = self.ball_spd_x_controller.compute(0, self.ball_pos_x)
+
+            if alignment < ALIGNMENT_TOLERANCE:
+                move_vec_x = 0
+            else:
+                move_vec_x = pd_output
+
+            move_vec_y = 0.2 * (math.sqrt(self.ball_dist * FORWARD_HALF_WIDTH) - math.sqrt(abs(self.ball_pos_x)))
+            move_vec_y = alignment - self.ball_pos_x
+
+            self.move_spd = 0.1 * math.hypot(move_vec_x, move_vec_y)
+
+            self.move_dir = self.wrap_angle(math.degrees(math.atan2(-move_vec_x, move_vec_y)))
+
+
+        elif self.ball_dist <= ORBIT_RADIUS:
+            self.stop_dribbler()
+            distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
+            orbit_angle = 90 + distance_ratio * 90
+            self.move_dir = self.ball_dir + np.copysign(orbit_angle, self.ball_dir)
+
+            self.move_spd = SPD_MAX
+
+        else:
+            self.stop_dribbler()
+            self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS/self.ball_dist)), self.ball_dir)
+            self.move_spd = SPD_MAX
+        
+        self.move_spd = self.clamp(self.move_spd, SPD_MIN, SPD_MAX)
+        
     def ball_hide(self):
         print("Ball Hiding")
         BALL_HIDE_YAW = 90 # 0 to 180; 90 means face wall, 180 means face backwards (probably shouldn't be less than 90 unless dribbler is horrible)
@@ -278,17 +321,17 @@ class Robot:
         # Region
         if abs(self.pos_x) > 350:
             if self.pos_y > 700:
-                self.region = RobotRegions.GOAL_SIDE
+                self.region = FieldRegions.GOAL_SIDE
             elif self.pos_y < -640:
-                self.region = RobotRegions.OWN_GOAL_SIDE
+                self.region = FieldRegions.OWN_GOAL_SIDE
             elif abs(self.pos_x):
-                self.region = RobotRegions.MIDDLE_SIDE
+                self.region = FieldRegions.MIDDLE_SIDE
         elif self.pos_y < -640:
-            self.region = RobotRegions.OWN_GOAL
+            self.region = FieldRegions.OWN_GOAL
         elif self.pos_y < 1100:
-            self.region = RobotRegions.MIDDLE
+            self.region = FieldRegions.MIDDLE
         else:
-            self.region = RobotRegions.NONE
+            self.region = FieldRegions.NONE
 
     def aligned_with_goal(self):
         half = self.goal_ang_width / 2
