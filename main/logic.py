@@ -83,10 +83,25 @@ class Robot:
         self.last_ball_dist = None
         self.last_ball_see_time = 0
         self.BALL_DIR_TIMEOUT = 0.8
-
         self.have_ball = False
         self.last_possession_time = None
         self.POSSESSION_TIMEOUT = 0.2
+        
+        ## Stationary ball detection (for defence)
+        self.ball_dir_record = RecentValues(num=12, min_values=4)
+        self.ball_dist_record = RecentValues(num=12, min_values=4)
+        self.ball_stationary_since = None
+        self.BALL_STATIONARY_TIMEOUT = 8
+        self.BALL_STATIONARY_ANGLE_TOL = 12
+        self.BALL_STATIONARY_DIST_TOL = 10
+        self.BALL_STATIONARY_VALID_RATIO = 0.8
+        self.temporary_attack_mode = False
+
+        # Defence constants
+        self.DEFENCE_KEEP_DIST = 50
+        self.DEFENCE_DIST_TOLERANCE = 5
+        self.DEFENCE_GOAL_WEIGHT = 0.1
+        self.DEFENCE_BALL_WEIGHT = 1.0
 
         # Goal
         self.target_goal_is_blue = False
@@ -227,26 +242,72 @@ class Robot:
 
     # ----- Defence -----#
 
-    def defence_loop(self):
-        KEEP_DIST = 50
-        TOLERANCE = 5
-        GOAL_WEIGHT = 0.1
-        BALL_WEIGHT = 1.0
+    def ball_has_been_still_for(self, timeout=None, angle_tol=None, dist_tol=None, valid_ratio=None):
+        timeout = self.BALL_STATIONARY_TIMEOUT if timeout is None else timeout
+        angle_tol = self.BALL_STATIONARY_ANGLE_TOL if angle_tol is None else angle_tol
+        dist_tol = self.BALL_STATIONARY_DIST_TOL if dist_tol is None else dist_tol
+        valid_ratio = self.BALL_STATIONARY_VALID_RATIO if valid_ratio is None else valid_ratio
 
-        if self.see_ball and self.ball_dist < 85:
-            self.attack_loop()
-            return
+        recent_dirs = list(self.ball_dir_record.values)
+        recent_dists = list(self.ball_dist_record.values)
+        if len(recent_dirs) < self.ball_dir_record.min_samples or len(recent_dists) < self.ball_dist_record.min_samples:
+            self.ball_stationary_since = None
+            return False
+
+        valid_dirs = [d for d in recent_dirs if d is not None]
+        valid_dists = [d for d in recent_dists if d is not None]
+        if not valid_dirs or not valid_dists:
+            self.ball_stationary_since = None
+            return False
+
+        if len(valid_dirs) / len(recent_dirs) < valid_ratio or len(valid_dists) / len(recent_dists) < valid_ratio:
+            self.ball_stationary_since = None
+            return False
+
+        last_dir = valid_dirs[-1]
+        last_dist = valid_dists[-1]
+        dir_stable = sum(abs(self.wrap_angle(d - last_dir)) <= angle_tol for d in valid_dirs) / len(valid_dirs)
+        dist_stable = sum(abs(d - last_dist) <= dist_tol for d in valid_dists) / len(valid_dists)
+
+        if dir_stable >= valid_ratio and dist_stable >= valid_ratio:
+            if self.ball_stationary_since is None:
+                self.ball_stationary_since = time.monotonic()
+            return time.monotonic() - self.ball_stationary_since >= timeout
+
+        self.ball_stationary_since = None
+        return False
+
+    def defence_loop(self):
         
+        if self.temporary_attack_mode or self.have_ball:
+            self.attack_loop()
+            if self.temporary_attack_mode_initiate_time - time.monotonic() > 20 or self.temporary_attack_mode_time_since_possession  - time.monotonic() > 8:
+                self.temporary_attack_mode = False
+                return
+            if self.have_ball:
+                self.temporary_attack_mode_time_since_possession = time.monotonic()
+            return
+        elif self.ball_has_been_still_for():
+            self.temporary_attack_mode = True
+            self.temporary_attack_mode_initiate_time = time.monotonic()
+            self.temporary_attack_mode_time_since_possession = time.monotonic()
+            return
+
+        if self.see_ball and self.ball_dist < 85 and not (self.goal_dir < self.DEFENCE_KEEP_DIST + self.DEFENCE_DIST_TOLERANCE * 2 and abs(self.to_absolute_dir(self.ball_dir)) > 90): 
+            self.ball_capture()
+            return
+
+        if self.see_ball and abs(self.to_absolute_dir(self.own_goal_dir)) < 80 and abs(self.to_absolute_dir(self.ball_dir)) > 80:
+            return
+
         if not self.see_own_goal:
             self.rot_dir = 0
             self.move_dir = self.to_relative_dir(self.angle_towards(0, -400))
-
-        if self.see_ball and abs(self.to_absolute_dir(self.own_goal_dir)) < 90 and abs(self.to_absolute_dir(self.ball_dir)) > 90:
             return
 
-        if KEEP_DIST - TOLERANCE < self.own_goal_dist < KEEP_DIST + TOLERANCE:
+        if self.DEFENCE_KEEP_DIST - self.DEFENCE_DIST_TOLERANCE < self.own_goal_dist < self.DEFENCE_KEEP_DIST + self.DEFENCE_DIST_TOLERANCE:
             move_dir_goal = 0
-        elif self.own_goal_dist > KEEP_DIST + TOLERANCE:
+        elif self.own_goal_dist > self.DEFENCE_KEEP_DIST + self.DEFENCE_DIST_TOLERANCE:
             move_dir_goal = self.own_goal_dir
         else:
             move_dir_goal = self.own_goal_dir + 180
@@ -277,8 +338,8 @@ class Robot:
 
         goal_angle = math.radians(self.to_absolute_dir(move_dir_goal))
         ball_angle = math.radians(move_dir_ball)
-        move_vec_x = GOAL_WEIGHT * math.sin(goal_angle) + BALL_WEIGHT * math.sin(ball_angle)
-        move_vec_y = GOAL_WEIGHT * math.cos(goal_angle) + BALL_WEIGHT * math.cos(ball_angle)
+        move_vec_x = self.DEFENCE_GOAL_WEIGHT * math.sin(goal_angle) + self.DEFENCE_BALL_WEIGHT * math.sin(ball_angle)
+        move_vec_y = self.DEFENCE_GOAL_WEIGHT * math.cos(goal_angle) + self.DEFENCE_BALL_WEIGHT * math.cos(ball_angle)
 
         self.move_spd = min(0.3, math.hypot(move_vec_x, move_vec_y))
         if self.move_spd == 0:
@@ -331,6 +392,12 @@ class Robot:
             if self.see_ball:
                 self.ball_pos_x = self.ball_dist * math.sin(math.radians(self.ball_dir))
                 self.ball_pos_y = self.ball_dist * math.cos(math.radians(self.ball_dir))
+            else:
+                self.ball_pos_x = None
+                self.ball_pos_y = None
+
+            self.ball_dir_record.update(self.ball_dir if self.see_ball else None)
+            self.ball_dist_record.update(self.ball_dist if self.see_ball else None)
     
             now = time.monotonic()
             if self.breakbeam.read():
