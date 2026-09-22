@@ -279,9 +279,9 @@ class Robot:
 
     def defence_loop(self):
         
-        if self.temporary_attack_mode or self.have_ball:
+        if self.temporary_attack_mode:
             self.attack_loop()
-            if self.temporary_attack_mode_initiate_time - time.monotonic() > 20 or self.temporary_attack_mode_time_since_possession  - time.monotonic() > 8:
+            if time.monotonic() - self.temporary_attack_mode_initiate_time > 20 or time.monotonic() - self.temporary_attack_mode_time_since_possession > 8:
                 self.temporary_attack_mode = False
                 return
             if self.have_ball:
@@ -293,7 +293,11 @@ class Robot:
             self.temporary_attack_mode_time_since_possession = time.monotonic()
             return
 
-        if self.see_ball and self.ball_dist < 85 and not (self.goal_dir < self.DEFENCE_KEEP_DIST + self.DEFENCE_DIST_TOLERANCE * 2 and abs(self.to_absolute_dir(self.ball_dir)) > 90): 
+        if self.have_ball:
+            self.attack_loop()
+            return
+        
+        if self.see_ball and self.ball_dist < 85 and not (self.own_goal_dist < self.DEFENCE_KEEP_DIST + self.DEFENCE_DIST_TOLERANCE * 2 and abs(self.to_absolute_dir(self.ball_dir)) > 90): 
             self.ball_capture()
             return
 
@@ -530,7 +534,7 @@ class Robot:
 
     def rotate_towards_goal(self):
         if self.see_goal:
-            self.rotate_about_dribbler(np.sign(self.goal_dir), 0.025)
+            self.rotate_about_dribbler(np.sign(self.goal_dir) * 0.025)
             # self.rot_spd = 0.01 * np.sign(self.goal_dir)
         else:
             print("rotate_towards_goal is being called when goal is not visible")
