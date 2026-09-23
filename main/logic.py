@@ -88,8 +88,8 @@ class Robot:
         self.POSSESSION_TIMEOUT = 0.2
         
         ## Stationary ball detection (for defence)
-        self.ball_dir_record = RecentValues(num=12, min_values=4)
-        self.ball_dist_record = RecentValues(num=12, min_values=4)
+        self.ball_dir_record = RecentValues(num=12, min_samples=4)
+        self.ball_dist_record = RecentValues(num=12, min_samples=4)
         self.ball_stationary_since = None
         self.BALL_STATIONARY_TIMEOUT = 8
         self.BALL_STATIONARY_ANGLE_TOL = 12
@@ -128,8 +128,8 @@ class Robot:
         self.yaw_controller.previous_error = self.yaw_error
         self.yaw_controller.previous_time = self.yaw_error_time
 
-        self.loc_x_record = RecentValues(num=12, min_values=3)
-        self.loc_y_record = RecentValues(num=12, min_values=3)
+        self.loc_x_record = RecentValues(num=12, min_samples=3)
+        self.loc_y_record = RecentValues(num=12, min_samples=3)
         self.is_at_goal_side = False
         self.is_at_own_goal_side = False
         self.is_at_middle_side = False
@@ -207,7 +207,12 @@ class Robot:
     def possession_behaviour(self):
         self.dribble()
 
-        if self.see_goal and not self.goal_side:
+        if self.is_at_goal_side or self.is_at_own_goal_side:
+            self.ball_hide()
+        elif self.is_at_goal_side:
+            self.move_dir = self.to_relative_dir(-180)
+            self.move_spd = 0.015
+        elif self.see_goal:
             self.move_spd = 0
             self.rotate_towards_goal()
         else:
@@ -215,7 +220,6 @@ class Robot:
             self.rot_spd = 0
 
     def ball_hide(self, yaw=90):
-
         if self.pos_y > 500:
             if self.see_goal:
                 self.rotate_towards_goal()
@@ -238,7 +242,7 @@ class Robot:
             self.move_spd = 0
 
     def is_ready_to_shoot(self):
-        return self.have_ball and self.see_goal and abs(self.goal_dir) < 0.7 * self.goal_ang_width
+        return self.have_ball and self.see_goal and abs(self.goal_dir) < 0.68 * self.goal_ang_width
 
     # ----- Defence -----#
 
@@ -305,7 +309,7 @@ class Robot:
             return
 
         if not self.see_own_goal:
-            self.rot_dir = 0
+            self.rot_spd = 0
             self.move_dir = self.to_relative_dir(self.angle_towards(0, -400))
             return
 
@@ -427,7 +431,7 @@ class Robot:
         self.see_goal = self.goal_dir is not None and self.goal_dist is not None
         self.own_goal_dir = self.wrap_angle(own_angle) if own_dist != 0 else None
         self.own_goal_dist = self.approx_real_dist(own_dist) / 10 if own_dist != 0 else None
-        self.own_goal_ang_width = self.wrap_angle(own_goal_ang_width) if target_dist != 0 else None
+        self.own_goal_ang_width = self.wrap_angle(own_goal_ang_width) if own_dist != 0 else None
         self.see_own_goal = self.own_goal_dir is not None and self.own_goal_dist is not None
 
     # ----- Actions ----- #
@@ -527,7 +531,7 @@ class Robot:
             self.rot_spd = self.clamp(speed * correction, -abs(max_spd), abs(max_spd))
 
     def rotate_about_dribbler(self, speed=0.05):
-        """Input: sign(speed) = 1 for clockwise, 1 for anticlockwise"""
+        """Input: sign(speed) = 1 for clockwise, -1 for anticlockwise"""
         self.rot_spd = speed
         self.move_dir = np.sign(speed) * -90
         self.move_spd = 1 * abs(speed) # 1 happened to be the ratio that works
