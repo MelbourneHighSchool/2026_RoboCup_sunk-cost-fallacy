@@ -256,6 +256,100 @@ class HSVInput:
             return True
 
         return curses.wrapper(main)
+    
+class CenterInput:
+    def __init__(self, title:str, low:int, high:int, default:list[int]=None, tip:str=None):
+        self.title = title
+        self.low = max(0, low)
+        self.high = max(0, high)
+
+        if not default or len(default) != 2:
+            self.center = [self.low + (self.high - self.low) // 2, self.low + (self.high - self.low) // 2]
+        else:
+            self.center = [_clamp(default[0], self.low, self.high), _clamp(default[1], self.low, self.high)]
+
+        self.tip = tip
+
+        self.running = True
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+        self.quit = False
+
+    def is_running(self):
+        return self.running
+
+    def _run(self):
+        def main(stdscr):
+            cur = 0
+            key = None
+            x, y = self.center[:]
+            while self.running:
+                stdscr.erase()
+                height, width = stdscr.getmaxyx()
+                
+                if key == ord("q"):
+                    self.quit = True
+                    break
+                elif key in [ord(" "), curses.KEY_ENTER, 10, 13]:
+                    break
+                elif key == curses.KEY_UP:
+                    cur = (cur - 1) % 2
+                elif key == curses.KEY_DOWN:
+                    cur = (cur + 1) % 2
+                elif key == curses.KEY_LEFT:
+                    if cur == 0:
+                        x = (x - 1) % (self.high + 1)
+                    else:
+                        y = (y - 1) % (self.high + 1)
+                elif key == curses.KEY_RIGHT:
+                    if cur == 0:
+                        x = (x + 1) % (self.high + 1)
+                    else:
+                        y = (y + 1) % (self.high + 1)
+    
+                # Create new windows
+                frame_width = 16
+                frame_height = 7
+
+                frame_main = curses.newwin(frame_height, frame_width, height // 2 - frame_height // 2, width // 2 - frame_width // 2)
+                
+                frame_main.addstr(0, 2, f"Centre")
+                
+                # Values
+                for i in range(2):
+                    if i == cur:
+                        frame_main.attron(curses.A_REVERSE)
+                    frame_main.addstr(i + 2, 2, f"{['X', 'Y'][i]}: {x if i == 0 else y:>3}")
+                    if i == cur:
+                        frame_main.attroff(curses.A_REVERSE)
+            
+                # Tip
+                if self.tip:
+                    stdscr.addstr(height - 2, 2, self.tip)
+    
+                # Continue
+                stdscr.addstr(height - 2, width - 26, "Press 'enter' to continue")
+
+                # Quit
+                stdscr.addstr(height - 3, width - 18, "Press 'q' to quit")
+    
+                # Refresh
+                stdscr.refresh()
+                frame_main.refresh()
+    
+                curses.curs_set(0)
+
+                # Save values 
+                self.center = [x, y]
+    
+                key = stdscr.getch()
+
+            self.running = False    
+            return True
+
+        return curses.wrapper(main)
+
         
 
 if __name__ == "__main__":
