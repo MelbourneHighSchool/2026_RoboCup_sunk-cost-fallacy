@@ -7,11 +7,12 @@ import busio
 
 from adafruit_bno08x import BNO_REPORT_ACCELEROMETER, BNO_REPORT_ROTATION_VECTOR, BNO_REPORT_GAME_ROTATION_VECTOR
 from adafruit_bno08x.i2c import BNO08X_I2C
+from lib.i2c_bus import I2C_LOCK
 
 class IMU:
     def __init__(self, poll_interval=0.01, yawCallback = lambda yaw:None):
         self._poll_interval = poll_interval
-        self._lock = threading.Lock()
+        self._lock = I2C_LOCK
         self._running = True
         self._latest_quaternion = None
         self._latest_yaw = None

@@ -17,8 +17,8 @@ import numpy as np
 import struct
 import time
 
-def distance_regression(dist):
-    return dist
+def distance_regression(dist_px):
+    return -13562.2348/(dist_px - 361.39354) - 35.70338
 
 def get_internal_angles(angles):
     angles = sorted(angles)
@@ -60,10 +60,13 @@ class Vision:
         angle = self.convert_directional_angle(angle)
         ang_width = self.convert_quantitative_angle(ang_width)
         return (angle, ang_width, distance, x, y, w, h, rang)
-
-    @property
-    def goal_localise_pos(self):
-        return self.goal_localise_pos_v[:]
+    
+    def goal_localise_pos(self, heading):
+        if heading is None:
+            return None
+        angle, distance, indated = self.goal_localise_info_v[:]
+        angle = np.radians(self.convert_directional_angle(angle) + heading)
+        return (distance * np.array((np.sin(angle), np.cos(angle))), indated)
 
     @staticmethod
     def convert_directional_angle(angle):
@@ -74,6 +77,16 @@ class Vision:
         return angle * 180 / 32767
 
     def load_config(self, config):
+        center = config.get_value("center")
+        if center is not None:
+            self.center_v[:] = center
+        
+        hsv = config.get_value("hsv")
+        if hsv is not None:
+            self.ball_bounds_v[:] = hsv["ball"]["low"] + hsv["ball"]["high"]
+            self.goal_bounds_v[:] = hsv["bgoal"]["low"] + hsv["bgoal"]["high"] + hsv["ygoal"]["low"] + hsv["ygoal"]["high"]
+    
+    def load_config_beta(self, config):
         center = config.get_value("center")
         if center is not None:
             self.center_v[:] = center
@@ -193,10 +206,10 @@ class Vision:
         # I just removed ke (constant of 3 at the end of the array), hopefully nothing breaks
         self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0))  # center angle, left angle, right angle, distance, x, y, w, h, rect_angle
         self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0))
-        self.goal_localise_pos_v = Array(c_float, (0, 0))
+        self.goal_localise_info_v = Array(c_int16, (0, 0, 0))
         self.enabled_goals_v = Value(c_uint8, 3)  # 2^0 bit: Blue goal enabled, 2^1 bit: Yellow goal enabled
 
-        self.goal_time_v = Array(c_float, (0, 0, 0, 0, 0, 0, 0, 0, 0, 0))  # last 10 timestamps of goal detection
+        # self.goal_time_v = Array(c_float, (0, 0, 0, 0, 0, 0, 0, 0, 0, 0))  # last 10 timestamps of goal detection
 
         self.broadcaster.register_proc(
             "Goals",
@@ -207,20 +220,20 @@ class Vision:
                 self.goal_bounds_v,
                 self.bgoal_info_v,
                 self.ygoal_info_v,
-                self.goal_localise_pos_v,
+                self.goal_localise_info_v,
                 self.enabled_goals_v,
                 self.camera.frame_shape,
-                self.goal_time_v
+                # self.goal_time_v
             )
         )
 
     @staticmethod
-    def goal_proc_init(goal_bounds_v, bgoal_info_v, ygoal_info_v, goal_localise_pos_v, enabled_goals_v, frame_shape, goal_time_v):
+    def goal_proc_init(goal_bounds_v, bgoal_info_v, ygoal_info_v, goal_localise_info_v, enabled_goals_v, frame_shape):
         # hsv_frame = np.zeros(shape=frame_shape, dtype=np.uint8)  # DEBUG
         goal_mask_frame = np.zeros(shape=frame_shape[:2], dtype=np.uint8)
-        values = [goal_bounds_v, bgoal_info_v, ygoal_info_v, goal_localise_pos_v, enabled_goals_v]
+        values = [goal_bounds_v, bgoal_info_v, ygoal_info_v, goal_localise_info_v, enabled_goals_v]
 
-        return [goal_mask_frame, values, goal_time_v]  # Also add hsv_frame if using for debug
+        return [goal_mask_frame, values]  # Also add hsv_frame if using for debug
     
     @staticmethod
     def goal_proc_loop(base_args: BaseProcArgs, keep_args: dict):
@@ -229,10 +242,8 @@ class Vision:
             return
         
         frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:6]
-        goal_mask_frame, values, goal_time_v = keep_args  # also unpack hsv_frame from here if using
-        goal_bounds_v, bgoal_info_v, ygoal_info_v, goal_localise_pos_v, enabled_goals_v = values
-
-        goal_time_v[:] = goal_time_v[1:] + [latest_timestamp]  # Shift left and add new timestamp
+        goal_mask_frame, values = keep_args  # also unpack hsv_frame from here if using
+        goal_bounds_v, bgoal_info_v, ygoal_info_v, goal_localise_info_v, enabled_goals_v = values
         
         enabled_goals = enabled_goals_v.value
         # cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, hsv_frame)  # DEBUG (Replace line below)
@@ -303,7 +314,14 @@ class Vision:
 
         # After everything, *localise.*
         if None not in goal_vectors:
-            goal_localise_pos_v[:] = -(goal_vectors[0] + goal_vectors[1]) / 2
+            field_center_relative_x, field_center_relative_y = -(goal_vectors[0] + goal_vectors[1]) / 2
+            direction = np.arctan2(field_center_relative_y, field_center_relative_x)
+            direction = int(direction / np.pi * 32767)
+            distance = np.hypot(field_center_relative_x, field_center_relative_y)
+            distance = int(min(32767, distance))
+            goal_localise_info_v[:] = direction, distance, True
+        else:
+            goal_localise_info_v[2] = False
 
             # time.sleep(0.5)  # DEBUG
             # if enabled_flag == 1:  # DEBUG

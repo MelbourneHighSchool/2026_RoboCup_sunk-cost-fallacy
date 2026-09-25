@@ -17,7 +17,7 @@ class ToF:
     def __init__(self, address=0x50, bus_number=1, poll_interval=0.02, callback=lambda distance:None):
         self._address = address
         self._poll_interval = poll_interval
-        self._lock = threading.Lock()
+        self._lock = I2C_LOCK
         self._running = True
         self._last_sequence = None
         self._latest_distance = None
@@ -27,9 +27,9 @@ class ToF:
         self._thread.start()
 
     def _read_sensor(self):
-        write = i2c_msg.write(self._address, [0x10])
-        read = i2c_msg.read(self._address, 5)
-        with I2C_LOCK:
+        with self._lock:
+            write = i2c_msg.write(self._address, [0x10])
+            read = i2c_msg.read(self._address, 5)
             self._bus.i2c_rdwr(write, read)
         data = list(read)
 
@@ -51,7 +51,7 @@ class ToF:
                     self._latest_distance = distance
             except Exception:
                 # Keep the background reader alive if an I2C read occasionally fails.
-                time.sleep(self._poll_interval)
+                # time.sleep(self._poll_interval)
 
     def _read_next_measurement(self):
         while self._running:
@@ -70,4 +70,5 @@ class ToF:
     def close(self):
         self._running = False
         self._thread.join(timeout=1.0)
-        self._bus.close()
+        with self._lock:
+            self._bus.close()
