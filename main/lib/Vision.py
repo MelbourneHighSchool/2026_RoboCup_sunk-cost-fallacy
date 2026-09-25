@@ -17,6 +17,9 @@ import numpy as np
 import struct
 import time
 
+def distance_regression(dist):
+    return dist
+
 def get_internal_angles(angles):
     angles = sorted(angles)
     gaps = [
@@ -57,6 +60,10 @@ class Vision:
         angle = self.convert_directional_angle(angle)
         ang_width = self.convert_quantitative_angle(ang_width)
         return (angle, ang_width, distance, x, y, w, h, rang)
+
+    @property
+    def goal_localise_pos(self):
+        return self.goal_localise_pos_v[:]
 
     @staticmethod
     def convert_directional_angle(angle):
@@ -186,6 +193,7 @@ class Vision:
         # I just removed ke (constant of 3 at the end of the array), hopefully nothing breaks
         self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0))  # center angle, left angle, right angle, distance, x, y, w, h, rect_angle
         self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0))
+        self.goal_localise_pos_v = Array(c_float, (0, 0))
         self.enabled_goals_v = Value(c_uint8, 3)  # 2^0 bit: Blue goal enabled, 2^1 bit: Yellow goal enabled
 
         self.goal_time_v = Array(c_float, (0, 0, 0, 0, 0, 0, 0, 0, 0, 0))  # last 10 timestamps of goal detection
@@ -199,6 +207,7 @@ class Vision:
                 self.goal_bounds_v,
                 self.bgoal_info_v,
                 self.ygoal_info_v,
+                self.goal_localise_pos_v,
                 self.enabled_goals_v,
                 self.camera.frame_shape,
                 self.goal_time_v
@@ -206,10 +215,10 @@ class Vision:
         )
 
     @staticmethod
-    def goal_proc_init(goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v, frame_shape, goal_time_v):
+    def goal_proc_init(goal_bounds_v, bgoal_info_v, ygoal_info_v, goal_localise_pos_v, enabled_goals_v, frame_shape, goal_time_v):
         # hsv_frame = np.zeros(shape=frame_shape, dtype=np.uint8)  # DEBUG
         goal_mask_frame = np.zeros(shape=frame_shape[:2], dtype=np.uint8)
-        values = [goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v]
+        values = [goal_bounds_v, bgoal_info_v, ygoal_info_v, goal_localise_pos_v, enabled_goals_v]
 
         return [goal_mask_frame, values, goal_time_v]  # Also add hsv_frame if using for debug
     
@@ -221,7 +230,7 @@ class Vision:
         
         frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:6]
         goal_mask_frame, values, goal_time_v = keep_args  # also unpack hsv_frame from here if using
-        goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v = values
+        goal_bounds_v, bgoal_info_v, ygoal_info_v, goal_localise_pos_v, enabled_goals_v = values
 
         goal_time_v[:] = goal_time_v[1:] + [latest_timestamp]  # Shift left and add new timestamp
         
@@ -229,6 +238,8 @@ class Vision:
         # cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, hsv_frame)  # DEBUG (Replace line below)
         cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, frame)
         cfg = np.array(goal_bounds_v, dtype=np.uint8)
+
+        goal_vectors = [None, None]  # For localisation, requires both goals to be enabled (0 blue, 1 yellow)
 
         # Do once for blue goal, do once for yellow goal
         for enabled_flag, lbound, ubound, goal_info_v in ((1, cfg[0:3], cfg[3:6], bgoal_info_v), (2, cfg[6:9], cfg[9:12], ygoal_info_v)):
@@ -252,7 +263,12 @@ class Vision:
             relative_x = goal_center_x - center_x
             relative_y = goal_center_y - center_y
 
-            distance = min(32767, int(np.hypot(relative_x, relative_y)))
+            distance_px = np.hypot(relative_x, relative_y)
+            if distance_px > 0.01:  # Put in goal vector in real distance
+                distance_real = distance_regression(distance_px)
+                goal_vectors[enabled_flag >> 1] = (relative_x, relative_y) * distance_real / distance_px
+            else:
+                goal_vectors[enabled_flag >> 1] = None
 
             rect_points = cv2.boxPoints(rect)  # Gives corners as [(x1, y1), (x2, y2)...]
             rect_point_angles = np.arctan2(rect_points[:, 1] - center_y, rect_points[:, 0] - center_x)
@@ -278,11 +294,17 @@ class Vision:
 
             goal_center_x = int(goal_center_x)
             goal_center_y = int(goal_center_y)
+            goal_distance = min(32767, int(distance_px))
             goal_width = int(goal_width)
             goal_height = int(goal_height)
             rect_angle = int(rect_angle)
 
-            goal_info_v[:] = angle, ang_width, distance, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle
+            goal_info_v[:] = angle, ang_width, goal_distance, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle
+
+        # After everything, *localise.*
+        if None not in goal_vectors:
+            goal_localise_pos_v[:] = -(goal_vectors[0] + goal_vectors[1]) / 2
+
             # time.sleep(0.5)  # DEBUG
             # if enabled_flag == 1:  # DEBUG
                 # cv2.imwrite("/var/www/html/frame.jpg", np.hstack((cv2.cvtColor(goal_mask_frame, cv2.COLOR_GRAY2BGR), frame, hsv_frame)))  # DEBUG
