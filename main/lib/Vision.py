@@ -277,7 +277,7 @@ class Vision:
             distance_px = np.hypot(relative_x, relative_y)
             if distance_px > 0.01:  # Put in goal vector in real distance
                 distance_real = distance_regression(distance_px)
-                goal_vectors[enabled_flag >> 1] = (relative_x, relative_y) * distance_real / distance_px
+                goal_vectors[enabled_flag >> 1] = np.array((relative_x, relative_y), dtype=np.float64) * distance_real / distance_px
             else:
                 goal_vectors[enabled_flag >> 1] = None
 
@@ -313,7 +313,7 @@ class Vision:
             goal_info_v[:] = angle, ang_width, goal_distance, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle
 
         # After everything, *localise.*
-        if None not in goal_vectors:
+        if goal_vectors[0] is not None and goal_vectors[1] is not None:
             field_center_relative_x, field_center_relative_y = -(goal_vectors[0] + goal_vectors[1]) / 2
             direction = np.arctan2(field_center_relative_y, field_center_relative_x)
             direction = int(direction / np.pi * 32767)
