@@ -166,7 +166,7 @@ class Robot:
         elif self.see_ball:
             self.ball_capture()
         if self.see_goal:
-            self.yaw_correct_towards_goal()
+            self.yaw_correct_towards_goggital()
         else:
             self.rot_dir = 0
     def attack_loop(self):
