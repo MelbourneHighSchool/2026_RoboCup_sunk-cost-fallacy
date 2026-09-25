@@ -13,7 +13,7 @@ def main():
 
     try:
         while True:
-            dribbler.set_speed(-1)
+            dribbler.set_speed(-0.1)
             time.sleep(0.1)
     except KeyboardInterrupt:
         pass
