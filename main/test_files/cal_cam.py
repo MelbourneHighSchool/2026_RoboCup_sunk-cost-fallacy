@@ -1,4 +1,4 @@
-"""Calibrate HSV values for ball and goals."""
+"""Calibrate HSV values for ball and goals, as well as center point of mirror."""
 from lib.Vision import Vision
 from lib.interface import WSServer
 from lib import term
@@ -27,6 +27,9 @@ def main(config):
     bgoal_low, bgoal_high = hsv["bgoal"].values()
     ygoal_low, ygoal_high = hsv["ygoal"].values()
 
+    width = None
+    height = None
+
     # run hsv input for ball and goals
     ball_hsv = term.HSVInput("Ball HSV", ball_low, ball_high, "1/3")
     while ball_hsv.is_running():
@@ -37,6 +40,10 @@ def main(config):
         frame = vision.camera.latest_frame
         if center is None:
             center = (frame.shape[1] // 2, frame.shape[0] // 2)
+
+        if width is None:
+            width = frame.shape[1]
+            height = frame.shape[0]
 
         angle, dist, x, y, r = vision.ball_info
         frame = cv2.line(frame, (center[0], center[1]), (x, y), (50, 50, 255), 2, cv2.LINE_AA)
@@ -92,10 +99,28 @@ def main(config):
         server.send_frame(frame)
     if ygoal_hsv.quit:
         return
+
+    center_input = term.CenterInput("Center Point", 0, max(width, height), center, "Use arrow keys to move the center point. Press 'q' to quit.")
+    while center_input.is_running():
+        center = center_input.center
+
+        # Draw on frame
+        frame = vision.camera.latest_frame
+
+        frame = cv2.line(frame, (center[0] - 20, center[1]), (center[0] + 20, center[1]), (255, 50, 50), 2, cv2.LINE_AA)
+        frame = cv2.line(frame, (center[0], center[1] - 20), (center[0], center[1] + 20), (255, 50, 50), 2, cv2.LINE_AA)
+
+        frame = cv2.putText(frame, f"Center: {center}", (15, 25), *((cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 5, cv2.LINE_AA)))
+
+        server.send_frame(frame)
+    if center_input.quit:
+        return
+    
     # save all values
     config.set_value("hsv", {
         "ball": {"low": ball_hsv.low, "high": ball_hsv.high},
         "bgoal": {"low": bgoal_hsv.low, "high": bgoal_hsv.high},
         "ygoal": {"low": ygoal_hsv.low, "high": ygoal_hsv.high}
     })
+    config.set_value("center", center)
     config.save_config()
