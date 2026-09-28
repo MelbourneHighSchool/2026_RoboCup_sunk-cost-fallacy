@@ -212,7 +212,22 @@ class Robot:
             self.move_dir = self.ball_dir + np.copysign(orbit_angle, self.ball_dir)
         else:
             self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS/self.ball_dist)), self.ball_dir)
+    
+    def possession_behaviour(self):
+        self.dribble()
 
+        if self.is_at_middle_side or self.is_at_own_goal_side:
+            self.ball_hide()
+        elif self.is_at_goal_side:
+            self.move_dir = self.to_relative_dir(-180)
+            self.move_spd = 0.02
+        elif self.see_goal:
+            self.move_spd = 0
+            self.rotate_towards_goal()
+        else:
+            self.move_spd = 0
+            self.rot_spd = 0
+            
     def ball_capture_2(self):
         ORBIT_RADIUS = 57
         SPD_MAX = 0.25

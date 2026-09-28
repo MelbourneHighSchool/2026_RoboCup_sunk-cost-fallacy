@@ -23,13 +23,18 @@ SOLENOID_PIN = board.D21
 PULSE_S = 0.02
 
 # -----------------------------------------------------------------------------------------------------------
-class AttackStates(Enum):
-    # Unused atm
-    DEFAULT = 0
-    BALL_HIDING = 1
-    PULL_BALL_FROM_GOAL_SIDE = 2
-    PULL_BALL_FROM_OWN_GOAL_SIDE = 3
-    CATCH_BALL_ON_SIDE = 4
+class States(Enum):
+    # States for when bot does not have possession:
+    NO_SEE_BALL = 0
+    DEFAULT_CHASE_BALL = 1
+    CHASE_BALL_MIDDLE_SIDE = 2
+    BALL_AT_GOAL_END = 3        # For when ball is at the side pockets of the goal so it can't be directly shot (proceeds to PULL_BALL state)
+    BALL_AT_OWN_GOAL_END = 4    # For when ball is at the side pockets of own goal so it can't be directly orbited (proceeds to BALL_HIDE state)
+
+    # States for when bot has possession:
+    ROTATE_TOWARDS_GOAL = 5
+    BALL_HIDE = 6
+    PULL_BALL = 7
 
 class RecentValues:
     def __init__(self, num=12, min_samples=3):
@@ -70,7 +75,10 @@ class Robot:
         self.run_switch = Switch(str(run_conf["pin"]), run_conf["on_high"])
 
         # State machine
-        self.state = AttackStates.DEFAULT
+        self.state = States.NO_SEE_BALL
+        self.last_logged_state = None
+        self.HYSTERESIS = 80 # How much bigger the rectangles are for exiting a state compared to entering a state (avoids chattering)
+        self.REGION_CERTAINTY = 0.85
 
         # Flags
         self.ENABLE_BALL_HIDING = False
@@ -84,8 +92,9 @@ class Robot:
         self.last_ball_see_time = 0
         self.BALL_DIR_TIMEOUT = 0.8
         self.have_ball = False
-        self.last_possession_time = None
-        self.POSSESSION_TIMEOUT = 0.49
+        self.last_possession_time = 0
+        self.time_since_last_possession = 9999
+        self.POSSESSION_TIMEOUT = 0.49 # Ideally this is below the solenoid cooldown time (otherwise it would shoot twice)
         
         ## Stationary ball detection (for defence)
         self.ball_dir_record = RecentValues(num=12, min_samples=4)
@@ -104,7 +113,7 @@ class Robot:
         self.DEFENCE_BALL_WEIGHT = 1.0
 
         # Goal
-        self.target_goal_is_blue = False
+        self.target_goal_is_blue = False # This gets overwritten by the switch later
         self.see_goal = False
         self.goal_dir = None
         self.goal_dist = None
@@ -125,6 +134,7 @@ class Robot:
         self.yaw_error = 0
         self.yaw_error_time = time.monotonic()
         self.yaw_controller = PDController(kp=0.001, kd=0.00001, max_derivative=100, debug=False)
+        self.yaw_controller_relative = PDController(kp=0.001, kd=0.00001, max_derivative=100, debug=False)
         self.yaw_controller.previous_error = self.yaw_error
         self.yaw_controller.previous_time = self.yaw_error_time
 
@@ -138,60 +148,99 @@ class Robot:
 
     def main_loop(self):
         self.update_stuff()
-        self.attack_loop()
-        # self.defence_loop()
-        
-        # self.attack_loop_simple()
+        self.debug_state_change()
 
+        self.attack_loop()
+        # self.attack_loop_simple()
         # self.defence_loop()
+
         if self.is_ready_to_shoot():
             self.kick() # Kick if there is a line of shot regardless of role
 
         self.move()
 
         # DEBUG
-        print(self.ball_dir, self.ball_dist, self.have_ball, self.pos_y)
+        # print(self.ball_dir, self.ball_dist, self.have_ball)
         # print(self.goal_dir, self.goal_ang_width, self.goal_dist)
         # print(self.own_goal_dir, self.own_goal_dist)
-        # print(self.region)
         # print(self.pos_x, self.pos_y)
-        # print(self.is_at_goal_side, self.is_at_own_goal_side, self.is_at_middle_side, self.have_ball)
-    
-    # ----- Offence ----- #
 
-    def attack_loop_simple(self):
-        if self.have_ball:
+    def debug_state_change(self):
+        """Print whenever the robot state changes"""
+        if self.last_logged_state is None:
+            self.last_logged_state = self.state
+            print(f"State: {self.state.name}")
+            return
+
+        if self.state != self.last_logged_state:
+            print(f"State change: {self.last_logged_state.name} -> {self.state.name}")
+            self.last_logged_state = self.state
+
+        
+    # ----- Offence ----- #
+    def attack_loop(self):  
+        if self.state == States.NO_SEE_BALL:
+            self.move_dir = self.to_relative_dir(self.angle_towards(0, -200))
+            self.move_spd = 0.1
+            self.yaw_correct()
+            self.stop_dribbler()
+
+        elif self.state == States.DEFAULT_CHASE_BALL:
+            if self.see_goal:
+                self.yaw_correct_towards_goal()
+            else:
+                self.rot_spd = 0
+
+            if self.see_ball:
+                self.ball_capture()
+
+        elif self.state == States.CHASE_BALL_MIDDLE_SIDE:
+            if self.see_ball and abs(self.ball_dir) < 30:
+                self.yaw_correct_relative(self.ball_dir)
+            else:
+                self.yaw_correct()
+
+            if self.see_ball:
+                self.ball_capture(soft=True)
+
+        elif self.state == States.BALL_AT_GOAL_END:
+            if self.see_ball and abs(self.ball_dir) < 30:
+                self.yaw_correct_relative(self.ball_dir)
+            else:
+                self.yaw_correct()
+            if self.see_ball:
+                self.ball_capture(soft=True)
+
+        elif self.state == States.BALL_AT_OWN_GOAL_END:
+            if self.see_ball:
+                self.yaw_correct_relative(self.ball_dir)
+                self.ball_capture(soft=True)
+
+        elif self.state == States.BALL_HIDE:
+            if self.have_ball:
+                self.ball_hide()
+            elif self.see_ball:
+                self.yaw_correct_relative(self.ball_dir)
+                self.ball_capture(soft=True)
+
+        elif self.state == States.PULL_BALL:
+            self.dribble()
+            if self.have_ball:
+                self.move_dir = self.to_relative_dir(-180)
+                self.move_spd = 0.01
+            elif self.see_ball:
+                self.yaw_correct_relative(self.ball_dir)
+                self.ball_capture(soft=True)
+
+        elif self.state == States.ROTATE_TOWARDS_GOAL:
+            self.dribble()
+            self.move_spd = 0
             if self.see_goal:
                 self.rotate_towards_goal()
-        elif self.see_ball:
-            self.ball_capture()
-        if self.see_goal:
-            self.yaw_correct_towards_goggital()
-        else:
-            self.rot_dir = 0
-    def attack_loop(self):
-        if self.have_ball:
-            self.possession_behaviour()
-        elif self.see_ball:
-            # Trying to gain possession of ball
-            if self.is_at_middle_side:
-                self.yaw_correct()
-                self.ball_capture(soft=True)
-            elif self.is_at_own_goal_side:
-                self.yaw_correct_relative(self.ball_dir)
-                self.ball_capture(soft=True)
-            elif self.is_at_goal_side:
-                self.yaw_correct_relative(self.ball_dir)
-                self.ball_capture(soft=True)
             else:
-                self.yaw_correct_towards_goal()
-                self.ball_capture()
-        else:
-            # If no ball seen, move towards (0, -150)
-            self.stop_dribbler()
-            self.yaw_correct()
-            self.move_dir = self.to_relative_dir(self.angle_towards(0, -150))
-    
+                self.rot_spd = 0
+
+
     def ball_capture(self, soft=False):
         MOVE_FORWARD_ANGLE = 15  # ±
         ORBIT_RADIUS = 100
@@ -201,71 +250,54 @@ class Robot:
         self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.035, 103)
 
         if abs(self.ball_dir) < 5:
-            print("FORWARD")
             self.dribble()
             self.move_dir = self.ball_dir
             self.move_spd = SPD_MAX if soft == False else self.lerp(self.ball_dist, 80, 140, 0.03, SPD_MAX)
         elif abs(self.ball_dir) < MOVE_FORWARD_ANGLE:
-            print("2.5")
             self.dribble()
             self.move_dir = self.ball_dir * 2.8
         elif self.ball_dist <= ORBIT_RADIUS:
-            print("Too close")
             self.stop_dribbler()
             distance_ratio = (ORBIT_RADIUS - self.ball_dist) / ORBIT_RADIUS
             orbit_angle = 90 + distance_ratio * 90
             self.move_dir = self.ball_dir + np.copysign(orbit_angle, self.ball_dir)
         else:
-            print("ORBIT")
             self.stop_dribbler()
             self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS/self.ball_dist)), self.ball_dir)
             self.move_spd = self.lerp(self.ball_dist, 100, 200, 0.2, 0.4)
 
-    def possession_behaviour(self):
-        self.dribble()
-
-        if self.is_at_middle_side or self.is_at_own_goal_side:
-            self.ball_hide()
-        elif self.is_at_goal_side:
-            self.move_dir = self.to_relative_dir(-180)
-            self.move_spd = 0.02
-        elif self.see_goal:
-            self.move_spd = 0
-            self.rotate_towards_goal()
-        else:
-            self.move_spd = 0
-            self.rot_spd = 0
-
     def ball_hide(self, yaw=90):
-        print("Ball hiding")
-        if self.pos_y > 500:
-            if self.see_goal:
-                print("Rotating towards goal")
-                self.rotate_towards_goal()
-                self.move_spd = 0
-                return
-            else:
-                print("I dont see the goal")
-                self.move_spd = 0
-        else:
+        if yaw - 5 < abs(self.bot_dir) < yaw + 5:
             self.rotate_about_dribbler(0.02 * np.sign(self.pos_x))
-            # self.yaw_correct(np.sign(self.pos_x) * yaw, speed=0.05, max_spd=0.02)
+        else:
+            self.rot_spd = 0
+        # self.yaw_correct(np.sign(self.pos_x) * yaw, speed=0.05, max_spd=0.02)
 
         if yaw - 10 < abs(self.bot_dir) < yaw + 10:
-            self.rot_spd = 0
-            print("BBB")
             if abs(self.pos_x) < 450:
-                self.move_dir = self.to_relative_dir(90 * np.sign(self.pos_x))
-                self.move_spd = 0.007
+                self.move_dir = self.to_relative_dir(45 * np.sign(self.pos_x))
+                self.move_spd = 0.01
             else:
                 self.move_dir = self.to_relative_dir(0)
-                self.move_spd = 0.007
+                self.move_spd = 0.01
         else:
             # self.move_spd = 0
             pass
 
     def is_ready_to_shoot(self):
-        return self.have_ball and self.see_goal and abs(self.goal_dir) < 0.8 * self.goal_ang_width
+        return self.have_ball and self.see_goal and abs(self.goal_dir) < 0.75 * self.goal_ang_width
+
+    def attack_loop_simple(self):
+        # Basiically states code; emergency backup for if attack_loop() is unusable due to its complexity
+        if self.have_ball:
+            if self.see_goal:
+                self.rotate_towards_goal()
+        elif self.see_ball:
+            self.ball_capture()
+        if self.see_goal:
+            self.yaw_correct_towards_goal()
+        else:
+            self.rot_spd = 0
 
     # ----- Defence -----#
 
@@ -305,83 +337,89 @@ class Robot:
         return False
 
     def defence_loop(self):
-        
+        if self.see_ball and abs(self.ball_dir) < 20 and self.ball_dist < 120:
+            self.dribble()
+        else:
+            self.stop_dribbler()
+
         if self.temporary_attack_mode:
-            print("Temporary attack mode!!!")
             self.attack_loop()
-            if time.monotonic() - self.temporary_attack_mode_initiate_time > 20 or time.monotonic() - self.temporary_attack_mode_time_since_possession > 8: # If 20 seconds since turned into attack mode or can't get ball within 8 seconds, return to defence
+            if time.monotonic() - self.temporary_attack_mode_initiate_time > 16 or time.monotonic() - self.temporary_attack_mode_time_since_possession > 8: # If 16 seconds since turned into attack mode or can't get ball within 8 seconds, return to defence
                 self.temporary_attack_mode = False
-                return
-            if self.have_ball:
+                print("Turned back to defence")
+            elif self.have_ball:
                 self.temporary_attack_mode_time_since_possession = time.monotonic()
-            return
-        elif self.ball_has_been_still_for():
+
+        elif not self.temporary_attack_mode and self.ball_has_been_still_for():
+            print("Temporary attack mode!!!!")
             self.temporary_attack_mode = True
             self.temporary_attack_mode_initiate_time = time.monotonic()
             self.temporary_attack_mode_time_since_possession = time.monotonic()
-            return
 
-        if self.have_ball:
+        elif self.have_ball:
             self.attack_loop()
-            return
         
-        if self.see_ball and self.ball_dist < 105 and not (self.own_goal_dist < self.DEFENCE_KEEP_DIST + self.DEFENCE_DIST_TOLERANCE * 2 and abs(self.to_absolute_dir(self.ball_dir)) > 90): 
+        elif self.see_ball and self.ball_dist < 100 and self.see_own_goal and not (self.own_goal_dist < self.DEFENCE_KEEP_DIST + self.DEFENCE_DIST_TOLERANCE * 2 and abs(self.to_absolute_dir(self.ball_dir)) > 90): 
+            # Try capture the ball if the ball is close enough and there is no risk of own-goalling
             self.ball_capture()
-            return
 
-        if not self.see_own_goal or (self.see_ball and self.see_own_goal and abs(self.to_absolute_dir(self.own_goal_dir)) < 70 and abs(self.to_absolute_dir(self.ball_dir)) > 70):
+        elif self.see_ball and self.see_own_goal and abs(self.to_absolute_dir(self.own_goal_dir)) < 70 and abs(self.to_absolute_dir(self.ball_dir)) > 70:
             # Don't go too far to the side
-            return
+            pass
 
-        if not self.see_own_goal:
+        elif not self.see_own_goal:
             self.rot_spd = 0
-            self.move_dir = self.to_relative_dir(self.angle_towards(0, -400))
-            return
-
-        if self.DEFENCE_KEEP_DIST - self.DEFENCE_DIST_TOLERANCE < self.own_goal_dist < self.DEFENCE_KEEP_DIST + self.DEFENCE_DIST_TOLERANCE:
-            move_dir_goal = 0
-        elif self.own_goal_dist > self.DEFENCE_KEEP_DIST + self.DEFENCE_DIST_TOLERANCE:
-            move_dir_goal = self.own_goal_dir
-        else:
-            move_dir_goal = self.own_goal_dir + 180
-
-        intercept = 0
-        if self.see_ball:
-            abs_goal_dir = self.to_absolute_dir(self.own_goal_dir)
-            abs_ball_dir = self.to_absolute_dir(self.ball_dir)
-            intercept = self.wrap_angle(abs_goal_dir - abs_ball_dir)
-            move_dir_ball = self.to_absolute_dir(np.sign(intercept) * 90)
-
-            # Face the circular midpoint between the ball and the direction
-            # opposite the goal, keeping the two objects on opposite sides
-            target_x = math.sin(math.radians(abs_ball_dir)) - math.sin(math.radians(abs_goal_dir))
-            target_y = math.cos(math.radians(abs_ball_dir)) - math.cos(math.radians(abs_goal_dir))
-            angle_target = math.degrees(math.atan2(target_x, target_y))
-            self.yaw_correct(self.wrap_angle(angle_target), tolerance=12)
+            self.move_dir = self.to_relative_dir(self.angle_towards(0, -500))
+            self.move_spd = self.lerp(math.hypot(0 - self.pos_x, -500 - self.pos_y), 30, 2000, 0.03, 0.3)
 
         else:
-            self.yaw_correct(self.to_absolute_dir(self.own_goal_dir) + 180, tolerance=12)
-            if move_dir_goal == 0:
-                self.move_spd = 0
+            if self.DEFENCE_KEEP_DIST - self.DEFENCE_DIST_TOLERANCE < self.own_goal_dist < self.DEFENCE_KEEP_DIST + self.DEFENCE_DIST_TOLERANCE:
+                # Good distance kept from goal
+                move_dir_goal = 999
+            elif self.own_goal_dist > self.DEFENCE_KEEP_DIST + self.DEFENCE_DIST_TOLERANCE:
+                # Too far away from goal
+                move_dir_goal = self.own_goal_dir
             else:
-                self.move_spd = 0.03
-                self.move_dir = move_dir_goal
-            return
+                # Too close to goal
+                move_dir_goal = self.own_goal_dir + 180
 
-        goal_angle = math.radians(self.to_absolute_dir(move_dir_goal))
-        ball_angle = math.radians(move_dir_ball)
-        move_vec_x = self.DEFENCE_GOAL_WEIGHT * math.sin(goal_angle) + self.DEFENCE_BALL_WEIGHT * math.sin(ball_angle)
-        move_vec_y = self.DEFENCE_GOAL_WEIGHT * math.cos(goal_angle) + self.DEFENCE_BALL_WEIGHT * math.cos(ball_angle)
+            intercept = 0
+            if self.see_ball:
+                abs_goal_dir = self.to_absolute_dir(self.own_goal_dir)
+                abs_ball_dir = self.to_absolute_dir(self.ball_dir)
+                intercept = self.wrap_angle(abs_goal_dir - abs_ball_dir)
+                move_dir_ball = self.to_absolute_dir(np.sign(intercept) * 90) # TODO: Try changing this to to_relative_dir()
 
-        self.move_spd = min(0.3, math.hypot(move_vec_x, move_vec_y))
-        if self.move_spd == 0:
-            self.move_dir = 0
-            return
+                # Face the circular midpoint between the ball and the direction
+                # opposite the goal, keeping the two objects on opposite sides
+                target_x = math.sin(math.radians(abs_ball_dir)) - math.sin(math.radians(abs_goal_dir))
+                target_y = math.cos(math.radians(abs_ball_dir)) - math.cos(math.radians(abs_goal_dir))
+                angle_target = math.degrees(math.atan2(target_x, target_y))
+                self.yaw_correct(self.wrap_angle(angle_target), tolerance=12)
 
-        if self.see_ball:
-            self.move_spd *= (max(0, (180 - abs(intercept) - 20)) / 180)**0.5
-        move_angle = math.degrees(math.atan2(move_vec_x, move_vec_y))
-        self.move_dir = self.to_relative_dir(self.wrap_angle(move_angle))
+                goal_angle = math.radians(self.to_absolute_dir(move_dir_goal))
+                ball_angle = math.radians(move_dir_ball)
+                move_vec_x = self.DEFENCE_GOAL_WEIGHT * math.sin(goal_angle) + self.DEFENCE_BALL_WEIGHT * math.sin(ball_angle)
+                move_vec_y = self.DEFENCE_GOAL_WEIGHT * math.cos(goal_angle) + self.DEFENCE_BALL_WEIGHT * math.cos(ball_angle)
+
+                move_angle = math.degrees(math.atan2(move_vec_x, move_vec_y))
+                self.move_dir = self.to_relative_dir(self.wrap_angle(move_angle))
+                
+                # self.move_spd = min(0.35, math.hypot(move_vec_x, move_vec_y))
+                # self.move_spd *= (max(0, (180 - abs(intercept))) / 180)**0.5
+
+                base_move_spd = min(0.35, math.hypot(move_vec_x, move_vec_y))
+                speed_correction = self.defence_speed_controller.compute(0.0, abs(intercept))
+                
+                self.move_spd = self.clamp(base_move_spd + speed_correction, 0.0, 0.35)
+            else:
+                self.yaw_correct(self.to_absolute_dir(self.own_goal_dir) + 180, tolerance=8)
+                if move_dir_goal == 999:
+                    self.move_spd = 0
+                else:
+                    self.move_spd = self.lerp(self.own_goal_dist, self.DEFENCE_KEEP_DIST, 200, 0.02, 0.4)
+                    self.move_dir = move_dir_goal
+
 
     # ----- Updates ----- #  
 
@@ -394,13 +432,102 @@ class Robot:
         self.loc_x_record.update(self.pos_x)
         self.loc_y_record.update(self.pos_y)
 
-        is_on_side = self.loc_x_record.check(lambda x: abs(x) > 320, 0.8) # True if at least 80% of recent values are say that the bot is on the side of the field
-        is_at_goal_y = self.loc_y_record.check(lambda y: y > 650, 0.8)
-        is_at_own_goal_y = self.loc_y_record.check(lambda y: y < -650, 0.8)
+        # ----- State machine ----- #
+        # Regions with a 2 at the end means its a bigger version of the region
+        # https://www.desmos.com/calculator/5kqwzcnv6d
 
-        self.is_at_goal_side = is_on_side and is_at_goal_y
-        self.is_at_own_goal_side = is_on_side and is_at_own_goal_y
-        self.is_at_middle_side = is_on_side and not is_at_goal_y and not is_at_own_goal_y
+        self.is_at_side = self.loc_x_record.check(lambda x: abs(x) > 400, self.REGION_CERTAINTY) # True if at least self.REGION_CERTAINTY of recent values are say that the bot is on the side of the field
+        self.is_at_side_2 = self.loc_x_record.check(lambda x: abs(x) > 400 - self.HYSTERESIS, self.REGION_CERTAINTY)
+
+        # Middle side
+        self.is_in_region_A = self.is_at_side and self.loc_y_record.check(lambda y: -700 < y < 450, self.REGION_CERTAINTY)
+        self.is_in_region_A_2 = self.is_at_side_2 and self.loc_y_record.check(lambda y: -700 - self.HYSTERESIS < y < 450 + self.HYSTERESIS, self.REGION_CERTAINTY)
+
+        # Goal side pocket
+        self.is_in_region_B = self.is_at_side and self.loc_y_record.check(lambda y: y > 730, self.REGION_CERTAINTY)
+        self.is_in_region_B_2 = self.is_at_side_2 and self.loc_y_record.check(lambda y: y > 730 - self.HYSTERESIS, self.REGION_CERTAINTY)
+
+        # Own goal side pocket
+        self.is_in_region_C = self.is_at_side and self.loc_y_record.check(lambda y: y < -700, self.REGION_CERTAINTY)
+        self.is_in_region_C_2 = self.is_at_side_2 and self.loc_y_record.check(lambda y: y < -700 + self.HYSTERESIS, self.REGION_CERTAINTY)
+
+        # State transitions
+        if self.state == States.NO_SEE_BALL:
+            if self.have_ball:
+                self.manage_states_possession()
+            elif self.see_ball:
+                self.manage_states_chase_ball()
+
+        elif self.state == States.DEFAULT_CHASE_BALL:
+            if self.have_ball:
+                self.manage_states_possession()
+            elif self.see_ball:
+                self.manage_states_chase_ball()
+            else:
+                self.state = States.NO_SEE_BALL
+
+        elif self.state == States.CHASE_BALL_MIDDLE_SIDE:
+            if self.have_ball:
+                self.manage_states_possession()
+            elif self.see_ball and not self.is_in_region_A_2:
+                self.manage_states_chase_ball()
+            elif not self.see_ball:
+                self.state = States.NO_SEE_BALL
+
+        elif self.state == States.BALL_AT_GOAL_END:
+            if self.have_ball:
+                self.manage_states_possession()
+            elif self.see_ball and not self.is_in_region_B_2:
+                self.manage_states_chase_ball()
+            elif not self.see_ball:
+                self.state = States.NO_SEE_BALL
+
+        elif self.state == States.BALL_AT_OWN_GOAL_END:
+            if self.have_ball:
+                self.manage_states_possession()
+            elif self.see_ball and not self.is_in_region_C_2:
+                self.manage_states_chase_ball()
+            elif not self.see_ball:
+                self.state = States.NO_SEE_BALL
+
+        elif self.state == States.BALL_HIDE:
+            if self.time_since_last_possession > 1.3:
+                self.manage_states_chase_ball()
+            elif self.have_ball and not self.is_in_region_A_2 and not self.is_in_region_C_2:
+                self.state = States.ROTATE_TOWARDS_GOAL
+
+        elif self.state == States.PULL_BALL:
+            if self.time_since_last_possession > 0.8:
+                self.manage_states_chase_ball()
+            elif self.have_ball and not self.is_in_region_B_2:
+                self.manage_states_possession()
+
+        elif self.state == States.ROTATE_TOWARDS_GOAL:
+            if not self.have_ball:
+                if self.see_ball:
+                    self.manage_states_chase_ball()
+                else:
+                    self.state = States.NO_SEE_BALL
+            else:
+                self.manage_states_possession()
+
+    def manage_states_possession(self):
+        if self.is_in_region_B:
+            self.state = States.PULL_BALL
+        elif self.is_in_region_A or self.is_in_region_C:
+            self.state = States.BALL_HIDE
+        else:
+            self.state = States.ROTATE_TOWARDS_GOAL
+    
+    def manage_states_chase_ball(self):
+        if self.is_in_region_A:
+            self.state = States.CHASE_BALL_MIDDLE_SIDE
+        elif self.is_in_region_B:
+            self.state = States.BALL_AT_GOAL_END
+        elif self.is_in_region_C:
+            self.state = States.BALL_AT_OWN_GOAL_END
+        else:
+            self.state = States.DEFAULT_CHASE_BALL    
 
     def update_ball_info(self, ball_dir, ball_dist):
             self.see_ball = True
@@ -434,8 +561,9 @@ class Robot:
             now = time.monotonic()
             if self.breakbeam.read():
                 self.last_possession_time = now
-    
-            self.have_ball = (self.last_possession_time is not None and now - self.last_possession_time < self.POSSESSION_TIMEOUT)
+
+            self.time_since_last_possession = now - self.last_possession_time
+            self.have_ball = (self.last_possession_time is not None and self.time_since_last_possession < self.POSSESSION_TIMEOUT)
 
     def update_goal_info(self, bgoal_angle, bgoal_ang_width, bgoal_dist, ygoal_angle, ygoal_ang_width, ygoal_dist):
         if self.target_goal_is_blue:
@@ -469,12 +597,15 @@ class Robot:
 
     def avoid_out_of_bounds(self):
         BOUND_LINE_X = 550    # mm, ±
-        BOUND_LINE_Y = 800     # mm, ±
-        START_SLOWDOWN_X_DIST = 75
-        START_SLOWDOWN_Y_DIST = 75
-        AVOID_WALL_SPD = 0.03
+        BOUND_LINE_Y = 790     # mm, ±
+        START_SLOWDOWN_X_DIST = 100
+        START_SLOWDOWN_Y_DIST = 100
+        AVOID_WALL_SPD = 0.05
 
         if self.move_dir is None or self.move_spd is None:
+            self.move_dir = 0
+            self.move_spd = 0
+            print("move_dir or move_spd is None for some reason")
             return
 
         x_dir = 1 if self.pos_x >= 0 else -1
@@ -513,7 +644,7 @@ class Robot:
         self.kicker.kick()
 
     def dribble(self):
-        self.dribbler.set_speed(-1)
+        self.dribbler.set_speed(-0.2)
     
     def stop_dribbler(self):
         self.dribbler.set_speed(0)
@@ -673,6 +804,7 @@ while True:
             robot.move_dir = 0
             robot.rot_spd = 0
             robot.drive.move(robot.move_dir, robot.move_spd, robot.rot_spd)
+            robot.stop_dribbler()
             paused = True
             continue
         if paused and robot.run_switch.read():
