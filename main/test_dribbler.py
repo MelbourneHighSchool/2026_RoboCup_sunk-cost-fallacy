@@ -13,12 +13,12 @@ def main():
 
     try:
         while True:
-            dribbler.set_speed(-1)
+            dribbler.set_torque(-1)
             time.sleep(0.1)
     except KeyboardInterrupt:
         pass
     finally:
-        dribbler.set_speed(0)
+        dribbler.set_torque(0)
         print("Stopped dribbler")
 
 if __name__ == "__main__":
