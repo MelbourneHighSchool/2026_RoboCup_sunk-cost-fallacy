@@ -218,10 +218,9 @@ class Robot:
                 self.ball_capture(soft=True)
 
         elif self.state == States.BALL_HIDE:
-            if self.have_ball:
+            if self.time_since_last_possession < 5:
                 self.ball_hide()
             elif self.see_ball:
-                self.yaw_correct_relative(self.ball_dir)
                 self.ball_capture(soft=True)
 
         elif self.state == States.PULL_BALL:
@@ -268,26 +267,26 @@ class Robot:
             self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS/self.ball_dist)), self.ball_dir)
             self.move_spd = self.lerp(self.ball_dist, 100, 200, 0.1, 0.3)
 
-    def ball_hide(self, yaw=90):
+    def ball_hide(self, yaw=180):
         self.dribble()
-        if yaw - 5 < abs(self.bot_dir) < yaw + 5:
+        target_angle = np.sign(self.pos_x) * yaw
+        if abs(self.wrap_angle(target_angle - self.bot_dir)) < 5:
             self.rot_spd = 0
         else:
-            self.rotate_about_dribbler(0.02 * np.sign(self.pos_x))
+            self.rotate_about_dribbler(np.sign(self.pos_x) * 0.01)
         # self.yaw_correct(np.sign(self.pos_x) * yaw, speed=0.05, max_spd=0.02)
 
-        if yaw - 10 < abs(self.bot_dir) < yaw + 10:
-            if abs(self.pos_x) < 450:
-                print("Diagonal")
+        if abs(self.wrap_angle(target_angle - self.bot_dir)) < 10:
+            if abs(self.pos_x) < 450 and False:
                 self.move_dir = self.to_relative_dir(45 * np.sign(self.pos_x))
                 self.move_spd = 0.02
             else:
-                print("Forward")
                 self.move_dir = self.to_relative_dir(0)
-                self.move_spd = 0.02
+                self.move_spd = 0.04
         else:
             # self.move_spd = 0
             pass
+
 
     def is_ready_to_shoot(self):
         return self.have_ball and self.see_goal and abs(self.goal_dir) < 0.75 * self.goal_ang_width
@@ -445,8 +444,9 @@ class Robot:
         self.is_at_side_2 = self.loc_x_record.check(lambda x: abs(x) > 280 - self.HYSTERESIS, self.REGION_CERTAINTY)
 
         self.is_near_goal = self.loc_y_record.check(lambda y: y > 300, self.REGION_CERTAINTY)
+
         # Middle side
-        self.is_in_region_A = self.is_at_side and self.loc_y_record.check(lambda y: -700 < y < 450, self.REGION_CERTAINTY)
+        self.is_in_region_A = self.is_at_side and self.loc_y_record.check(lambda y: -700 < y < 240, self.REGION_CERTAINTY)
         self.is_in_region_A_2 = self.is_at_side_2 and self.loc_y_record.check(lambda y: -700 - self.HYSTERESIS < y < 450 + self.HYSTERESIS, self.REGION_CERTAINTY)
 
         # Goal side pocket
@@ -497,7 +497,7 @@ class Robot:
                 self.state = States.NO_SEE_BALL
 
         elif self.state == States.BALL_HIDE:
-            if self.time_since_last_possession > 1.3:
+            if self.time_since_last_possession > 5:
                 self.manage_states_chase_ball()
             elif self.is_near_goal: #not self.is_in_region_A_2 and not self.is_in_region_C_2
                 self.state = States.ROTATE_TOWARDS_GOAL
@@ -509,13 +509,11 @@ class Robot:
                 self.manage_states_possession()
 
         elif self.state == States.ROTATE_TOWARDS_GOAL:
-            if not self.time_since_last_possession > 1.3:
+            if self.time_since_last_possession > 1.5:
                 if self.see_ball:
                     self.manage_states_chase_ball()
                 else:
                     self.state = States.NO_SEE_BALL
-            else:
-                self.manage_states_possession()
 
     def manage_states_possession(self):
         if self.is_in_region_B:
@@ -530,7 +528,7 @@ class Robot:
             self.state = States.CHASE_BALL_MIDDLE_SIDE
         elif self.is_in_region_B:
             self.state = States.BALL_AT_GOAL_END
-        elif self.is_in_region_C:
+        elif self.is_in_region_C and False:
             self.state = States.BALL_AT_OWN_GOAL_END
         else:
             self.state = States.DEFAULT_CHASE_BALL    
@@ -691,6 +689,18 @@ class Robot:
         else:
             self.rot_spd = self.clamp(speed * correction, -abs(max_spd), abs(max_spd))
 
+    def rotate_about_dribbler_2(self, target_angle, speed=0.01):
+        """Rotate toward an absolute heading while pivoting about the dribbler"""
+        if self.bot_dir is None:
+            self.rot_spd = 0
+            self.move_spd = 0
+            return
+
+        direction = np.sign(self.wrap_angle(target_angle - self.bot_dir))
+        self.rot_spd = direction * abs(speed)
+        self.move_dir = direction * -90
+        self.move_spd = abs(speed) # 1 happened to be the ratio that works
+
     def rotate_about_dribbler(self, speed=0.01):
         """Input: sign(speed) = 1 for clockwise, -1 for anticlockwise"""
         self.rot_spd = speed
@@ -699,7 +709,7 @@ class Robot:
 
     def rotate_towards_goal(self):
         if self.see_goal:
-            self.rotate_about_dribbler(np.sign(self.goal_dir) * 0.01)
+            self.rotate_about_dribbler_2(self.to_absolute_dir(self.goal_dir), 0.01)
             # self.rot_spd = 0.01 * np.sign(self.goal_dir)
         else:
             print("rotate_towards_goal is being called when goal is not visible")
