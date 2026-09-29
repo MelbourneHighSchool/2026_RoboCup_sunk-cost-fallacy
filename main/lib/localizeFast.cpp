@@ -194,9 +194,14 @@ int main(){
                 targetAngle = tValue;
             } else {
                 if (tValue < (200 - tofRadius) or (tValue + targetDists[(tIdx + 4) % 8] + tofRadius > maxRayDist)){
-                    badToF[tIdx] = true;
                     // prevent bad tof from erroneously labeling the opposite ToF as bad
-                    targetDists[tIdx] = minWallDist; 
+                    if (targetDists[(tIdx + 4) % 8] > tValue){
+                        badToF[(tIdx + 4) % 8] = true;
+                        targetDists[(tIdx + 4) % 8] = minWallDist;
+                    } else{
+                        badToF[tIdx] = true;
+                        targetDists[tIdx] = minWallDist; 
+                    }
                 } else{
                     badToF[tIdx] = false;
                     targetDists[tIdx] = tValue + tofRadius;

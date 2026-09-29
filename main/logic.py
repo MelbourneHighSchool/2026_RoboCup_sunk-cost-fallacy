@@ -138,8 +138,8 @@ class Robot:
         self.yaw_controller.previous_error = self.yaw_error
         self.yaw_controller.previous_time = self.yaw_error_time
 
-        self.loc_x_record = RecentValues(num=30, min_samples=3)
-        self.loc_y_record = RecentValues(num=30, min_samples=3)
+        self.loc_x_record = RecentValues(num=60, min_samples=3)
+        self.loc_y_record = RecentValues(num=60, min_samples=3)
         self.is_at_goal_side = False
         self.is_at_own_goal_side = False
         self.is_at_middle_side = False
@@ -164,6 +164,7 @@ class Robot:
         # print(self.goal_dir, self.goal_ang_width, self.goal_dist)
         # print(self.own_goal_dir, self.own_goal_dist)
         # print(self.pos_x, self.pos_y)
+        # self.loc.printDebug()
 
     def debug_state_change(self):
         """Print whenever the robot state changes"""
@@ -234,25 +235,26 @@ class Robot:
 
         elif self.state == States.ROTATE_TOWARDS_GOAL:
             self.dribble()
-            self.move_spd = 0
             if self.see_goal:
                 self.rotate_towards_goal()
             else:
+                self.move_spd = 0
                 self.rot_spd = 0
+                print("i dont see the goal")
 
 
     def ball_capture(self, soft=False):
         MOVE_FORWARD_ANGLE = 15  # ±
         ORBIT_RADIUS = 100
-        SPD_MAX = 0.32
+        SPD_MAX = 0.25
         SPD_MIN = 0.02
 
-        self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.035, 103)
+        self.move_spd = self.sigmoid(self.ball_dist, SPD_MIN, SPD_MAX, 0.035, 105)
 
         if abs(self.ball_dir) < 5:
             self.dribble()
             self.move_dir = self.ball_dir
-            self.move_spd = SPD_MAX if soft == False else self.lerp(self.ball_dist, 80, 140, 0.03, SPD_MAX)
+            self.move_spd = SPD_MAX if soft == False else self.lerp(self.ball_dist, 100, 140, 0.02, SPD_MAX)
         elif abs(self.ball_dir) < MOVE_FORWARD_ANGLE:
             self.dribble()
             self.move_dir = self.ball_dir * 2.8
@@ -264,22 +266,25 @@ class Robot:
         else:
             self.stop_dribbler()
             self.move_dir = self.ball_dir + np.copysign(math.degrees(np.asin(ORBIT_RADIUS/self.ball_dist)), self.ball_dir)
-            self.move_spd = self.lerp(self.ball_dist, 100, 200, 0.2, 0.4)
+            self.move_spd = self.lerp(self.ball_dist, 100, 200, 0.1, 0.3)
 
     def ball_hide(self, yaw=90):
+        self.dribble()
         if yaw - 5 < abs(self.bot_dir) < yaw + 5:
-            self.rotate_about_dribbler(0.02 * np.sign(self.pos_x))
-        else:
             self.rot_spd = 0
+        else:
+            self.rotate_about_dribbler(0.02 * np.sign(self.pos_x))
         # self.yaw_correct(np.sign(self.pos_x) * yaw, speed=0.05, max_spd=0.02)
 
         if yaw - 10 < abs(self.bot_dir) < yaw + 10:
             if abs(self.pos_x) < 450:
+                print("Diagonal")
                 self.move_dir = self.to_relative_dir(45 * np.sign(self.pos_x))
-                self.move_spd = 0.01
+                self.move_spd = 0.02
             else:
+                print("Forward")
                 self.move_dir = self.to_relative_dir(0)
-                self.move_spd = 0.01
+                self.move_spd = 0.02
         else:
             # self.move_spd = 0
             pass
@@ -436,9 +441,10 @@ class Robot:
         # Regions with a 2 at the end means its a bigger version of the region
         # https://www.desmos.com/calculator/5kqwzcnv6d
 
-        self.is_at_side = self.loc_x_record.check(lambda x: abs(x) > 400, self.REGION_CERTAINTY) # True if at least self.REGION_CERTAINTY of recent values are say that the bot is on the side of the field
-        self.is_at_side_2 = self.loc_x_record.check(lambda x: abs(x) > 400 - self.HYSTERESIS, self.REGION_CERTAINTY)
+        self.is_at_side = self.loc_x_record.check(lambda x: abs(x) > 280, self.REGION_CERTAINTY) # True if at least self.REGION_CERTAINTY of recent values are say that the bot is on the side of the field
+        self.is_at_side_2 = self.loc_x_record.check(lambda x: abs(x) > 280 - self.HYSTERESIS, self.REGION_CERTAINTY)
 
+        self.is_near_goal = self.loc_y_record.check(lambda y: y > 300, self.REGION_CERTAINTY)
         # Middle side
         self.is_in_region_A = self.is_at_side and self.loc_y_record.check(lambda y: -700 < y < 450, self.REGION_CERTAINTY)
         self.is_in_region_A_2 = self.is_at_side_2 and self.loc_y_record.check(lambda y: -700 - self.HYSTERESIS < y < 450 + self.HYSTERESIS, self.REGION_CERTAINTY)
@@ -493,7 +499,7 @@ class Robot:
         elif self.state == States.BALL_HIDE:
             if self.time_since_last_possession > 1.3:
                 self.manage_states_chase_ball()
-            elif self.have_ball and not self.is_in_region_A_2 and not self.is_in_region_C_2:
+            elif self.is_near_goal: #not self.is_in_region_A_2 and not self.is_in_region_C_2
                 self.state = States.ROTATE_TOWARDS_GOAL
 
         elif self.state == States.PULL_BALL:
@@ -503,7 +509,7 @@ class Robot:
                 self.manage_states_possession()
 
         elif self.state == States.ROTATE_TOWARDS_GOAL:
-            if not self.have_ball:
+            if not self.time_since_last_possession > 1.3:
                 if self.see_ball:
                     self.manage_states_chase_ball()
                 else:
@@ -596,11 +602,11 @@ class Robot:
         # self.drive.move(0, 0, self.rot_spd)
 
     def avoid_out_of_bounds(self):
-        BOUND_LINE_X = 550    # mm, ±
+        BOUND_LINE_X = 550  # mm, ±
         BOUND_LINE_Y = 790     # mm, ±
         START_SLOWDOWN_X_DIST = 100
         START_SLOWDOWN_Y_DIST = 100
-        AVOID_WALL_SPD = 0.05
+        AVOID_WALL_SPD = 0.03
 
         if self.move_dir is None or self.move_spd is None:
             self.move_dir = 0
@@ -644,7 +650,7 @@ class Robot:
         self.kicker.kick()
 
     def dribble(self):
-        self.dribbler.set_speed(-0.2)
+        self.dribbler.set_speed(-0.15)
     
     def stop_dribbler(self):
         self.dribbler.set_speed(0)
