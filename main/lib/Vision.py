@@ -20,6 +20,43 @@ import time
 def distance_regression(dist_px):
     return -13562.2348/(dist_px - 361.39354) - 35.70338
 
+fieldW, fieldL = 152, 213  # Note: These values subtract 30cm because they're for lines, not field
+maximumError = 5
+def findCenter(pcloud) -> np.array:
+    rayAngles = pcloud[:, 0]
+    rayDists = pcloud[:, 1]
+    rayXs, rayYs = np.cos(rayAngles) * rayDists, np.sin(rayAngles) * rayDists
+
+    maxX, minX, maxY, minY = max(rayXs), min(rayXs), max(rayYs), min(rayYs)
+    closestWall = np.argmin(((maxX-rayXs), (rayXs - minX), (maxY-rayYs),(rayYs-minY),rayDists.astype(float) * maximumError),0)
+    rightWallPs, leftWallPs, topWallPs, bottomWallPs = rayXs[closestWall==0], rayXs[closestWall==1], rayYs[closestWall==2], rayYs[closestWall==3]
+
+    cxR, numRightWall = np.average(rightWallPs) - (fieldL / 2), len(rightWallPs)
+    cxL, numLeftWall = np.average(leftWallPs) + (fieldL / 2), len(leftWallPs)   
+    # print(cxL, numLeftWall, cxR, numRightWall)
+    # print(max(leftWallPs), min(leftWallPs))
+    cx = 0
+    if abs(cxL - cxR) > fieldL * maximumError:
+        if numRightWall > numLeftWall:
+            cx = cxR
+        else:
+            cx = cxL
+    else:
+        cx = (cxR * numRightWall + cxL * numLeftWall) / (numLeftWall + numRightWall) 
+
+    cyT, numTopWall = np.average(topWallPs) - (fieldW / 2), len(topWallPs)
+    cyB, numBottomWall = np.average(bottomWallPs) + (fieldW / 2), len(bottomWallPs)
+    cy = 0
+    if abs(cyB - cyT) > fieldW * maximumError:
+        if numTopWall > numBottomWall:
+            cy = cyT
+        else:
+            cy = cyB
+    else:
+        cy = (cyT * numTopWall + cyB * numBottomWall) / (numBottomWall + numTopWall)
+        
+    return np.array((cx, cy))
+
 def get_internal_angles(angles):
     angles = sorted(angles)
     gaps = [
@@ -37,6 +74,7 @@ class Vision:
         self.camera = Camera()
         self.broadcaster = Broadcaster(self.camera.create_broadcaster_args())
 
+        self.yaw_v = Value(c_int16, 0)
         self.center_v = self.camera.v_center
         self.ball_proc_setup()
         self.goal_proc_setup()
@@ -129,6 +167,10 @@ class Vision:
         with self.camera.c_new_frame:
             self.camera.c_new_frame.wait(timeout=timeout)
 
+    @staticmethod
+    def yaw_callback(self, yaw):
+        self.yaw_v.value = int(yaw * 32767 / 180)
+    
     # Ball proc
     def ball_proc_setup(self):
         self.ball_bounds_v = Array(c_uint8, (0, 120, 160, 30, 255, 255))  # (lboundH, S, V, uboundH, S, V) - change defaults later!
@@ -206,7 +248,6 @@ class Vision:
         # I just removed ke (constant of 3 at the end of the array), hopefully nothing breaks
         self.bgoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0))  # center angle, left angle, right angle, distance, x, y, w, h, rect_angle
         self.ygoal_info_v = Array(c_int16, (0, 0, 0, 0, 0, 0, 0, 0))
-        self.goal_localise_info_v = Array(c_int16, (0, 0, 0))
         self.enabled_goals_v = Value(c_uint8, 3)  # 2^0 bit: Blue goal enabled, 2^1 bit: Yellow goal enabled
 
         # self.goal_time_v = Array(c_float, (0, 0, 0, 0, 0, 0, 0, 0, 0, 0))  # last 10 timestamps of goal detection
@@ -220,7 +261,6 @@ class Vision:
                 self.goal_bounds_v,
                 self.bgoal_info_v,
                 self.ygoal_info_v,
-                self.goal_localise_info_v,
                 self.enabled_goals_v,
                 self.camera.frame_shape,
                 # self.goal_time_v
@@ -228,29 +268,27 @@ class Vision:
         )
 
     @staticmethod
-    def goal_proc_init(goal_bounds_v, bgoal_info_v, ygoal_info_v, goal_localise_info_v, enabled_goals_v, frame_shape):
+    def goal_proc_init(goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v, frame_shape):
         # hsv_frame = np.zeros(shape=frame_shape, dtype=np.uint8)  # DEBUG
         goal_mask_frame = np.zeros(shape=frame_shape[:2], dtype=np.uint8)
-        values = [goal_bounds_v, bgoal_info_v, ygoal_info_v, goal_localise_info_v, enabled_goals_v]
+        values = [goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v]
 
         return [goal_mask_frame, values]  # Also add hsv_frame if using for debug
     
     @staticmethod
-    def goal_proc_loop(base_args: BaseProcArgs, keep_args: dict):
+    def goal_proc_loop(base_args: BaseProcArgs, keep_args: list):
         enabled = base_args.enabled
         if not enabled:
             return
         
         frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:6]
         goal_mask_frame, values = keep_args  # also unpack hsv_frame from here if using
-        goal_bounds_v, bgoal_info_v, ygoal_info_v, goal_localise_info_v, enabled_goals_v = values
+        goal_bounds_v, bgoal_info_v, ygoal_info_v, enabled_goals_v = values
         
         enabled_goals = enabled_goals_v.value
         # cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, hsv_frame)  # DEBUG (Replace line below)
         cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, frame)
         cfg = np.array(goal_bounds_v, dtype=np.uint8)
-
-        goal_vectors = [None, None]  # For localisation, requires both goals to be enabled (0 blue, 1 yellow)
 
         # Do once for blue goal, do once for yellow goal
         for enabled_flag, lbound, ubound, goal_info_v in ((1, cfg[0:3], cfg[3:6], bgoal_info_v), (2, cfg[6:9], cfg[9:12], ygoal_info_v)):
@@ -275,11 +313,6 @@ class Vision:
             relative_y = goal_center_y - center_y
 
             distance_px = np.hypot(relative_x, relative_y)
-            if distance_px > 0.01:  # Put in goal vector in real distance
-                distance_real = distance_regression(distance_px)
-                goal_vectors[enabled_flag >> 1] = np.array((relative_x, relative_y), dtype=np.float64) * distance_real / distance_px
-            else:
-                goal_vectors[enabled_flag >> 1] = None
 
             rect_points = cv2.boxPoints(rect)  # Gives corners as [(x1, y1), (x2, y2)...]
             rect_point_angles = np.arctan2(rect_points[:, 1] - center_y, rect_points[:, 0] - center_x)
@@ -312,20 +345,70 @@ class Vision:
 
             goal_info_v[:] = angle, ang_width, goal_distance, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle
 
-        # After everything, *localise.*
-        if goal_vectors[0] is not None and goal_vectors[1] is not None:
-            field_center_relative_x, field_center_relative_y = -(goal_vectors[0] + goal_vectors[1]) / 2
-            direction = np.arctan2(field_center_relative_y, field_center_relative_x)
-            direction = int(direction / np.pi * 32767)
-            distance = np.hypot(field_center_relative_x, field_center_relative_y)
-            distance = int(min(32767, distance))
-            goal_localise_info_v[:] = direction, distance, True
-        else:
-            goal_localise_info_v[2] = False
-
             # time.sleep(0.5)  # DEBUG
             # if enabled_flag == 1:  # DEBUG
                 # cv2.imwrite("/var/www/html/frame.jpg", np.hstack((cv2.cvtColor(goal_mask_frame, cv2.COLOR_GRAY2BGR), frame, hsv_frame)))  # DEBUG
+    
+    def lines_proc_setup(self):
+        self.line_bounds_v = Array(c_uint8, (0, 0, 200), (255, 20, 255))
+        self.estimated_pos_v = Array(c_int16, (0, 0, 0, 0, 0, 0))  # x, y, tolerance +x, -x, +y, -y
+        self.dbg_points = Array(c_float, 720)
+
+        self.broadcaster.register_proc(
+            "Lines",
+            self.lines_proc_init,
+            self.lines_proc_loop,
+            None,
+            (
+                self.line_bounds_v,
+                self.estimated_pos_v,
+                self.camera.frame_shape,
+                self.yaw_v,
+                self.dbg_points
+            )
+        )
+    
+    @staticmethod
+    def lines_proc_init(line_bounds_v, estimated_pos_v, frame_shape, yaw_v, dbg_points):
+        lines_mask_frame = np.zeros(shape=frame_shape[:2], dtype=np.uint8)
+        return [lines_mask_frame, line_bounds_v, estimated_pos_v, yaw_v, dbg_points]
+    
+    @staticmethod
+    def lines_proc_loop(base_args: BaseProcArgs, keep_args: list):
+        enabled = base_args.enabled
+        if not enabled:
+            return
+        
+        frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:6]
+        lines_mask_frame, line_bounds_v, estimated_pos_v, yaw_v, dbg_points = keep_args
+        
+        cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, frame)
+        cv2.inRange(frame, line_bounds_v[:3], line_bounds_v[3:], lines_mask_frame)
+
+        max_radius = int(np.hypot(frame_shape[0], frame_shape[1]) * 0.7)  # Rough estimate
+        polar_img = cv2.warpPolar(
+            lines_mask_frame,
+            dsize=(max_radius, 360), # 360 angle steps, max_radius distance resolution
+            center=center,
+            maxRadius=max_radius,
+            flags=cv2.WARP_POLAR_LINEAR + cv2.INTER_NEAREST
+        )
+
+        pcloud = []
+        has_hits = polar_img > 0
+        first_hit_radii = np.argmax(has_hits, axis=1)
+        yaw = yaw_v.value * np.pi / 32767
+        lines_contour = np.zeros(shape=(360, 1, 2), dtype=np.int32)
+        for i in range(360):
+            if first_hit_radii[i] <= 0:
+                continue
+            angle = i*2*np.pi/360
+            pcloud.append((angle - yaw, distance_regression(first_hit_radii[i])))
+            dbg_points[2*i] = first_hit_radii[i] * np.cos(pcloud[i][0])
+            dbg_points[2*i+1] = first_hit_radii[i] * np.sin(pcloud[i][1])
+            lines_contour[i][0] = np.array((first_hit_radii[i] * np.cos(angle), first_hit_radii[i] * np.sin(angle)), dtype=np.int32)
+
+        estimated_pos_v[:] = findCenter(np.array(pcloud)).astype(int)
     
     # def bot_proc_setup(self):
     #     self.field_bounds_v = Array(c_uint8, (70, 51, 77, 110, 255, 255))
