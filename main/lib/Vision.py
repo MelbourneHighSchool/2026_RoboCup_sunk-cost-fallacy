@@ -8,6 +8,7 @@ TO DO
 - Possibly add locks for shared variables (but not sure if necessary)
 """
 
+from lib.localise import findCentre
 from multiprocessing import Value, Array
 from lib.BaseVision import Camera, Broadcaster, BaseProcArgs
 from ctypes import c_bool, c_uint8, c_uint16, c_int16, c_float
@@ -78,6 +79,7 @@ class Vision:
         self.center_v = self.camera.v_center
         self.ball_proc_setup()
         self.goal_proc_setup()
+        self.lines_proc_setup()
 
     @property
     def ball_info(self):
@@ -166,8 +168,7 @@ class Vision:
         "Note: May sometimes trigger without waiting for the next frame"
         with self.camera.c_new_frame:
             self.camera.c_new_frame.wait(timeout=timeout)
-
-    @staticmethod
+    
     def yaw_callback(self, yaw):
         self.yaw_v.value = int(yaw * 32767 / 180)
     
@@ -350,8 +351,8 @@ class Vision:
                 # cv2.imwrite("/var/www/html/frame.jpg", np.hstack((cv2.cvtColor(goal_mask_frame, cv2.COLOR_GRAY2BGR), frame, hsv_frame)))  # DEBUG
     
     def lines_proc_setup(self):
-        self.line_bounds_v = Array(c_uint8, (0, 0, 200), (255, 20, 255))
-        self.estimated_pos_v = Array(c_int16, (0, 0, 0, 0, 0, 0))  # x, y, tolerance +x, -x, +y, -y
+        self.line_bounds_v = Array(c_uint8, (0, 0, 60, 255, 50, 255))
+        self.estimated_pos_v = Array(c_int16, (0, 0))  # x, y
         self.dbg_points = Array(c_float, 720)
 
         self.broadcaster.register_proc(
@@ -383,7 +384,7 @@ class Vision:
         lines_mask_frame, line_bounds_v, estimated_pos_v, yaw_v, dbg_points = keep_args
         
         cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, frame)
-        cv2.inRange(frame, line_bounds_v[:3], line_bounds_v[3:], lines_mask_frame)
+        cv2.inRange(frame, np.array(line_bounds_v[:3]), np.array(line_bounds_v[3:]), lines_mask_frame)
 
         max_radius = int(np.hypot(frame_shape[0], frame_shape[1]) * 0.7)  # Rough estimate
         polar_img = cv2.warpPolar(
@@ -404,11 +405,16 @@ class Vision:
                 continue
             angle = i*2*np.pi/360
             pcloud.append((angle - yaw, distance_regression(first_hit_radii[i])))
-            dbg_points[2*i] = first_hit_radii[i] * np.cos(pcloud[i][0])
-            dbg_points[2*i+1] = first_hit_radii[i] * np.sin(pcloud[i][1])
+            dbg_points[2*i] = first_hit_radii[i] * np.cos(pcloud[-1][0])
+            dbg_points[2*i+1] = first_hit_radii[i] * np.sin(pcloud[-1][1])
             lines_contour[i][0] = np.array((first_hit_radii[i] * np.cos(angle), first_hit_radii[i] * np.sin(angle)), dtype=np.int32)
 
-        estimated_pos_v[:] = findCenter(np.array(pcloud)).astype(int)
+        if not pcloud:
+            estimated_pos_v[:] = (-32767, -32767)
+            return
+        field_center = findCentre(np.array(pcloud)).astype(int)
+        print(field_center)
+        estimated_pos_v[:] = field_center
     
     # def bot_proc_setup(self):
     #     self.field_bounds_v = Array(c_uint8, (70, 51, 77, 110, 255, 255))
