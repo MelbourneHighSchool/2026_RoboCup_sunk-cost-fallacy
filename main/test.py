@@ -1,68 +1,27 @@
 from lib.config import Config
 from lib import term
 
-import argparse
 from enum import IntEnum
 
 # Enums
 # class 
 
-# Setup parser
-parser = argparse.ArgumentParser()
-component_group = parser.add_argument_group("components", "test individual components").add_mutually_exclusive_group()
-program_group = parser.add_argument_group("programs", "run multiple programs together for testing")
-
-parser.add_argument("-c", "--calibrate", action="store_true", help="calibrate the camera")
-
-component_group.add_argument("-d", "--drive", action="store_true", help="test drive")
-component_group.add_argument("-v", "--vision", action="store_true", help="test vision")
-component_group.add_argument("-r", "--dribbler", action="store_true", help="test dribbler")
-component_group.add_argument("-i", "--interface", action="store_true", help="test interface")
-component_group.add_argument("-u", "--imu", action="store_true", help="test compass/imu")
-component_group.add_argument("-w", "--switches", action="store_true", help="test switches")
-component_group.add_argument("-l", "--localise", action="store_true", help="test localisation")
-
-program_group.add_argument("-b", "--ball-chasing", action="store_true", help="enable ball chasing")
-program_group.add_argument("-y", "--yaw-correction", action="store_true", help="enable yaw correction")
-program_group.add_argument("-g", "--goal-chasing", action="store_true", help="enable goal chasing")
-program_group.add_argument("-k", "--kicker", action="store_true", help="enable kicker")
-program_group.add_argument("-s", "--stream", action="store_true", help="enable streaming interface")
-
-args = parser.parse_args()
-
 # Select mode (only ask if no args are provided)
-if not any([v for _, v in args._get_kwargs()]):
-    mode = term.radio_select(
-        "Select mode",
-        ["Components", "Programs", "Calibrate"],
-        tip="1/2"
-    )
-    if mode is False:
-        print("User quit")
-        exit(0)
-else:
-    components = any([args.drive, args.vision, args.dribbler, args.interface])
-    programs = any([args.ball_chasing, args.yaw_correction, args.goal_chasing, args.kicker, args.stream])
-    calibrate = args.calibrate
-    if components + programs + calibrate > 1:
-        print("Error: Can only select one of components, programs, or calibrate")
-        exit(1)
-    else:
-        if components:
-            mode = 0
-        elif programs:
-            mode = 1
-        else:
-            mode = 2
+mode = term.radio_select(
+    "Select mode",
+    ["Components", "Programs", "Calibrate"],
+    tip="1/2"
+)
+if mode is False:
+    print("User quit")
+    exit(0)
 
 # Rest of setup
 if mode == 0:
     preset = 0
-    if any([args.drive, args.vision, args.dribbler, args.interface]):
-        preset = [args.drive, args.vision, args.dribbler, args.interface].index(True)
     res = term.radio_select(
         "Select a component to test",
-        ["Drive", "Vision", "Dribbler", "Interface", "IMU", "Switches", "Localisation"],
+        ["Drive", "Vision", "Dribbler", "Interface", "IMU", "Switches", "Localisation", "Breakbeam"],
         descriptions=[
             "Test the drive system by giving motor commands.",
             "Test the vision system by detecting the ball and goals, and logging the information.",
@@ -70,9 +29,9 @@ if mode == 0:
             "Test the interface by logging messages from clients and sending messages to them.",
             "Test the IMU by printing its outputs and logging the time it took to start.",
             "Test the switches by printing their states.",
-            "Test the localisation system by logging the robot's position."
+            "Test the localisation system by logging the robot's position.",
+            "Test the breakbeam sensor with the dribbler."
         ],
-        preset=preset,
         tip="2/2"
     )
 elif mode == 1:
@@ -87,7 +46,6 @@ elif mode == 1:
             "Enable the kicker program, which will kick the ball when it is in possession and lined up with the goal.",
             "Enable the streaming interface, which will stream from the camera to the webinter."
         ],
-        preset=[args.ball_chasing, args.yaw_correction, args.goal_chasing, args.dribbler, args.kicker, args.stream],
         tip="2/2"
     )
 elif mode == 2:
@@ -126,6 +84,9 @@ match mode:
             case 6:
                 from test_files import test_localise
                 test_localise.main(config)
+            case 7:
+                from test_files import test_breakbeam
+                test_breakbeam.main(config)
     case 1:
         match res:
             case 1:
