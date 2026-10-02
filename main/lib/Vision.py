@@ -70,6 +70,79 @@ def get_internal_angles(angles):
     inner = ordered[1:3]
     return inner
 
+def parse_goal_contour(goal_contour, img_center):
+    rect = cv2.minAreaRect(goal_contour)
+
+    goal_center, goal_dims, rect_angle = rect
+
+    relative_x = goal_center[0] - img_center[0]
+    relative_y = goal_center[1] - img_center[1]
+    distance_px = np.hypot(relative_x, relative_y)
+
+    rect_points = cv2.boxPoints(rect)  # Gives corners as [(x1, y1), (x2, y2)...]
+    rect_point_angles = np.arctan2(rect_points[:, 1] - img_center[1], rect_points[:, 0] - img_center[0])
+    internal_angles = get_internal_angles(rect_point_angles)
+    center_angle = sum(internal_angles) / 2  # But what if angle wrapping? Might have to add 180°
+    ang_width = abs(internal_angles[1] - internal_angles[0]) / 2
+    if abs(internal_angles[1] - internal_angles[0]) >= np.pi:
+        center_angle += np.pi
+        ang_width = np.pi - ang_width
+
+    # Convert angle to ±180
+    center_angle %= (2 * np.pi)
+    if center_angle > np.pi:
+        center_angle -= 2 * np.pi
+
+    angle = int(center_angle / np.pi * 32767)
+    ang_width = int(ang_width / np.pi * 32767)
+
+    # angular_goal_width = min(np.abs(rect_point_angles - angle))
+
+    # polygon = cv2.approxPolyDP(bestContour, ke * cv2.arcLength(bestContour, True), True)
+    # goal_center_x, goal_center_y = np.mean(polygon[:, 0, :], axis=0).astype(np.int16)
+
+    goal_center_x = int(goal_center_x)
+    goal_center_y = int(goal_center_y)
+    goal_distance = min(32767, int(distance_px))
+    goal_width = int(goal_width)
+    goal_height = int(goal_height)
+    rect_angle = int(rect_angle)
+
+    return (angle, ang_width, goal_distance, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle)
+
+def find_goals(mask, img_center):
+    goal_contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+    if not goal_contours:
+        return (0, 0, 0, 0, 0, 0, 0, 0)
+
+    sorted_contours = sorted(goal_contours, key=cv2.contourArea, reverse=True)
+    big_contour = sorted_contours[0]
+    lil_contour = sorted_contours[1]
+    big_info = parse_goal_contour(big_contour, img_center)
+    lil_info = parse_goal_contour(lil_contour, img_center)
+
+    # Consider the little contour
+    # Area ratio between lil : big must be >0.8
+    if cv2.contourArea(lil_contour) / cv2.contourArea(big_contour) > 0.8:
+        return big_info
+
+    # If lil open angle too small then fahh nah
+    if lil_info[1] / big_info[1] < 0.2:
+        return big_info
+
+    # Otherwise, get the goal whose nearest post is closest to the goals 
+    lal = lil_info[0] - lil_info[1]
+    lar = lil_info[0] + lil_info[1]
+    bal = big_info[0] - big_info[1]
+    bar = big_info[0] + big_info[1]
+
+    lil_score = -np.min(np.abs(lal), np.abs(lar)) * np.sign(lal * lar)  # Multiply by sign makes score +ve if forward is inside goal posts
+    big_score = -np.min(np.abs(bal), np.abs(bar)) * np.sign(bal * bar)
+    if big_score >= lil_score:
+        return big_info
+    else:
+        return lil_info
+
 class Vision:
     def __init__(self):
         self.camera = Camera()
@@ -79,7 +152,7 @@ class Vision:
         self.center_v = self.camera.v_center
         self.ball_proc_setup()
         self.goal_proc_setup()
-        self.lines_proc_setup()
+        # self.lines_proc_setup()
 
     @property
     def ball_info(self):
@@ -298,60 +371,14 @@ class Vision:
                 continue
 
             cv2.inRange(frame, lbound, ubound, goal_mask_frame)  # Replace with hsv_frame if using
-            goalContours = cv2.findContours(goal_mask_frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
-            if not goalContours:
-                goal_info_v[:] = (0, 0, 0, 0, 0, 0, 0, 0)
-                continue
-
-            bestContour = max(goalContours, key=cv2.contourArea)
-            rect = cv2.minAreaRect(bestContour)
-
-            (goal_center_x, goal_center_y), (goal_width, goal_height), rect_angle = rect
-
-            center_x = center[0]
-            center_y = center[1]
-            relative_x = goal_center_x - center_x
-            relative_y = goal_center_y - center_y
-
-            distance_px = np.hypot(relative_x, relative_y)
-
-            rect_points = cv2.boxPoints(rect)  # Gives corners as [(x1, y1), (x2, y2)...]
-            rect_point_angles = np.arctan2(rect_points[:, 1] - center_y, rect_points[:, 0] - center_x)
-            internal_angles = get_internal_angles(rect_point_angles)
-            center_angle = sum(internal_angles) / 2  # But what if angle wrapping? Might have to add 180°
-            ang_width = abs(internal_angles[1] - internal_angles[0]) / 2
-            if abs(internal_angles[1] - internal_angles[0]) >= np.pi:
-                center_angle += np.pi
-                ang_width = np.pi - ang_width
-
-            # Convert angle to ±180
-            center_angle %= (2 * np.pi)
-            if center_angle > np.pi:
-                center_angle -= 2 * np.pi
-
-            angle = int(center_angle / np.pi * 32767)
-            ang_width = int(ang_width / np.pi * 32767)
-
-            # angular_goal_width = min(np.abs(rect_point_angles - angle))
-
-            # polygon = cv2.approxPolyDP(bestContour, ke * cv2.arcLength(bestContour, True), True)
-            # goal_center_x, goal_center_y = np.mean(polygon[:, 0, :], axis=0).astype(np.int16)
-
-            goal_center_x = int(goal_center_x)
-            goal_center_y = int(goal_center_y)
-            goal_distance = min(32767, int(distance_px))
-            goal_width = int(goal_width)
-            goal_height = int(goal_height)
-            rect_angle = int(rect_angle)
-
-            goal_info_v[:] = angle, ang_width, goal_distance, goal_center_x, goal_center_y, goal_width, goal_height, rect_angle
+            goal_info_v[:] = find_goals(goal_mask_frame, center)
 
             # time.sleep(0.5)  # DEBUG
             # if enabled_flag == 1:  # DEBUG
                 # cv2.imwrite("/var/www/html/frame.jpg", np.hstack((cv2.cvtColor(goal_mask_frame, cv2.COLOR_GRAY2BGR), frame, hsv_frame)))  # DEBUG
     
     def lines_proc_setup(self):
-        self.line_bounds_v = Array(c_uint8, (0, 0, 60, 255, 50, 255))
+        self.line_bounds_v = Array(c_uint8, (0, 0, 180, 255, 30, 255))
         self.estimated_pos_v = Array(c_int16, (0, 0))  # x, y
         self.dbg_points = Array(c_float, 720)
 
@@ -382,9 +409,11 @@ class Vision:
         
         frame_size, frame_shape, center, latest_idx, latest_timestamp, frame = base_args[:6]
         lines_mask_frame, line_bounds_v, estimated_pos_v, yaw_v, dbg_points = keep_args
-        
+
+        cv2.blur(frame, (9, 9))
         cv2.cvtColor(frame, cv2.COLOR_BGR2HSV_FULL, frame)
         cv2.inRange(frame, np.array(line_bounds_v[:3]), np.array(line_bounds_v[3:]), lines_mask_frame)
+        cv2.circle(lines_mask_frame, center, 52, 0, cv2.FILLED)
 
         max_radius = int(np.hypot(frame_shape[0], frame_shape[1]) * 0.7)  # Rough estimate
         polar_img = cv2.warpPolar(
@@ -402,6 +431,8 @@ class Vision:
         lines_contour = np.zeros(shape=(360, 1, 2), dtype=np.int32)
         for i in range(360):
             if first_hit_radii[i] <= 0:
+                dbg_points[2*i] = 0
+                dbg_points[2*i+1] = 0
                 continue
             angle = i*2*np.pi/360
             pcloud.append((angle - yaw, distance_regression(first_hit_radii[i])))
@@ -413,7 +444,7 @@ class Vision:
             estimated_pos_v[:] = (-32767, -32767)
             return
         field_center = findCentre(np.array(pcloud)).astype(int)
-        print(field_center)
+        # print(field_center)
         estimated_pos_v[:] = field_center
     
     # def bot_proc_setup(self):

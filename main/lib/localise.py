@@ -65,7 +65,7 @@ def findCentre(pcloud):
 
     if np.isnan(x2):
         x2 = x1 + FIELD_W * np.sign(bandsX[0][maxXi] - x1)
-        print("Estimated width", "+" if np.sign(x2 - x1) > 0 else "-")
+        # print("Estimated width", "+" if np.sign(x2 - x1) > 0 else "-")
 
     bandsY[1][(y1 - ERROR_RADIUS <= bandsY[0]) & (bandsY[0] <= y1 + ERROR_RADIUS)] = 0  # Remove scattered points around peak
     bandsY[1][:] = bandsY[1] - PREDICTION_GAIN*(np.abs(np.abs(bandsY[0] - y1) - FIELD_L))
@@ -78,9 +78,9 @@ def findCentre(pcloud):
 
     if np.isnan(y2):
         y2 = y1 + FIELD_L * np.sign(bandsY[0][maxYi] - y1)
-        print("Estimated width", "+" if np.sign(y2 - y1) > 0 else "-")
+        # print("Estimated width", "+" if np.sign(y2 - y1) > 0 else "-")
     
     xc = (x1 + x2) / 2
     yc = (y1 + y2) / 2
-    print(x1, x2, y1, y2)
+    # print(x1, x2, y1, y2)
     return np.array((xc, yc))
