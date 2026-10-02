@@ -80,6 +80,9 @@ class Motor:
         self.set_quick_data_readout_format(self.QDRformat)
 
     def set_speed(self, speed: float):
+        if self.command_mode != CommandMode.SPEED:
+            print("Warning: Attempting to set speed while not in SPEED command mode.")
+            self.configure_command_mode(CommandMode.SPEED)
         try:
             speed = int(self.max_speed * clamp(speed, -1.0, 1.0))
             data = struct.pack("<i", speed)
@@ -161,8 +164,8 @@ class Motor:
 
     def set_current_limit_FOC(self, current):
         try:
-            self.max_current = abs(current)
-            data = struct.pack("<i", current)
+            self.max_current = int(abs(current))
+            data = struct.pack("<i", self.max_current)
             with self._lock:
                 self.bus.write_i2c_block_data(self.i2c_address, 0x33, list(data))
         except Exception as e:
