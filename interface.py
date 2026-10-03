@@ -18,7 +18,7 @@ while True:
     except (ConnectionRefusedError, websocket.WebSocketAddressException):
         print(f"Failed to connect to ws://{host}:8765. Please check the host and try again.")
         continue
-    ws.send('{"message": "register"}')
+    # ws.send('{"message": "register"}')
 
     try:
         while True:
@@ -33,16 +33,23 @@ while True:
                 ws.close()
                 break
             if data:
-                message = json.loads(data)
-                if message.get("message") == "image":
-                    frame_base64 = message.get("data")
-                    frame_bytes = base64.b64decode(frame_base64)
-                    frame_array = np.frombuffer(frame_bytes, dtype=np.uint8)
-                    frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+                # message = json.loads(data)
+                # if message.get("message") == "image":
+                #     frame_base64 = message.get("data")
+                #     frame_bytes = base64.b64decode(frame_base64)
+                #     frame_array = np.frombuffer(frame_bytes, dtype=np.uint8)
+                #     frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+                #
+                #     # Display the frame
+                #     cv2.imshow("Received Frame", frame)
+                #     if cv2.waitKey(1) & 0xFF == ord('q'):
+                #         break
 
-                    # Display the frame
-                    cv2.imshow("Received Frame", frame)
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        break
+                nparr = np.frombuffer(data, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if frame is not None:
+                    cv2.imshow("received", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
     except websocket.WebSocketConnectionClosedException:
         print("Connection closed.")

@@ -12,6 +12,8 @@ import cv2
 import base64
 import queue
 
+JPEG_QUALITY = 80
+
 class WSServerHandlerID:
     def __init__(self, message, index):
         self.message = message
@@ -39,12 +41,11 @@ class WSServer:
                 message = self.send_buffer.get()
                 if type(message) is not dict:
                     # Encode as image
-                    ret, buffer = cv2.imencode('.jpg', message)
+                    ret, buffer = cv2.imencode('.jpg', message, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
                     if ret:
-                        frame_base64 = base64.b64encode(buffer).decode('utf-8')
-                        self._broadcast({"message": "image", "data": frame_base64})
+                        self._broadcast(buffer.tobytes())
                 else:
-                    self._broadcast(message)
+                    print("not implemented in interface ...")
 
     def run(self):
         self.run_thread = threading.Thread(target=self._server_loop, daemon=True)
@@ -101,7 +102,7 @@ class WSServer:
     def _broadcast(self, message):
         if self.clients:
             for client in self.clients:
-                client.send(json.dumps(message))
+                client.send(message)
 
     def send_frame(self, message):
         """Send a frame or message to all connected clients."""
@@ -112,13 +113,13 @@ class WSServer:
         try:
             data = json.loads(message)
             # Check connection is valid
-            if not self.registered:
-                if data.get("message") == "register":
-                    self.registered = True
-                    print("Client registered successfully.")
-                else:
-                    websocket.send(json.dumps({"message":"error", "error": "Client not registered. Please send a 'register' message first."}))
-                    return
+            # if not self.registered:
+            #     if data.get("message") == "register":
+            #         self.registered = True
+            #         print("Client registered successfully.")
+            #     else:
+            #         websocket.send(json.dumps({"message":"error", "error": "Client not registered. Please send a 'register' message first."}))
+            #         return
             # Call relevant handlers
             if data.get("message") and self.handlers.get(data["message"]):
                 for callback in self.handlers[data["message"]]:
