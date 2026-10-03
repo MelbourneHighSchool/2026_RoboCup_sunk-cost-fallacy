@@ -100,7 +100,11 @@ class Camera:
     
     def start(self):
         self.camera.start()
-        self.camera.set_controls({"AfMode": controls.AfModeEnum.Manual, "LensPosition": 50.0})
+        self.camera.set_controls({
+            "AfMode": controls.AfModeEnum.Manual,
+            "LensPosition": 50.0,
+            "ExposureValue": -2.0
+            })
     
     def stop(self, terminate=False):
         self.camera.stop()
