@@ -168,6 +168,7 @@ void localiseLoop(){
 array<float,8> mdists;
 float merr;
 int tIdx;
+unsigned short int numBadTofs;
 float tValue;
 int main(){
     //main loop handles io. boring, don't want to annotate
@@ -217,6 +218,11 @@ int main(){
         } else if (action == 'o'){
             outlock.lock();
             cout << bestX << "\n" << bestY << "\n";
+            numBadTofs = 0;
+            for (int i = 0; i < 8; i++){
+                numBadTofs += badToF[i];
+            }
+            cout << numBadTofs << "\n";
             cout.flush();
             outlock.unlock();
             cout.flush();

@@ -4,7 +4,7 @@ Contains localizer class
 import subprocess, threading
 from math import radians, degrees
 from lib.imu import IMU
-from lib.tof import ToF
+from lib.tofsynchronised import ToFs
 from time import sleep
 class Localizer:
     """
@@ -15,11 +15,12 @@ class Localizer:
     Use getPositionAndBearing to read output
     """
     tofDistanceFromCenter = 50
-    def __init__(self, tofs:list[ToF], imu:IMU):
+    def __init__(self, tofs:ToFs, imu:IMU):
         self._alive = True
         self.tofs = tofs
-        for i, tof in enumerate(self.tofs):
-            tof.callback = self.updateFunctionGenerator(i)
+        # for i, tof in enumerate(self.tofs):
+        #     tof.callback = self.updateFunctionGenerator(i)
+        tofs.callback = lambda i, dist: self.updateReading(i, dist)
         self.imu = imu
         self.imu.yawCallback = lambda ang: self.updateReading(8, radians(ang))
         self.cppModule = subprocess.Popen(
@@ -50,14 +51,15 @@ class Localizer:
             self.cppModule.stdin.write("o\n")
             self.cppModule.stdin.flush()
 
-        x, y = self.cppModule.stdout.readline(), self.cppModule.stdout.readline()
+        x, y, numBad = self.cppModule.stdout.readline(), self.cppModule.stdout.readline(), self.cppModule.stdout.readline()
 
         x = float(x[:-1])
         y = float(y[:-1])
+        numBad = int(numBad[:-1])
         # bearing = degrees(float(output[1][:-1]))
         # sensor_data = output[2]
         
-        return (x, y)
+        return (x, y), numBad
     def printDebug(self):
         with self.cppIOLock:
             self.cppModule.stdin.write("d\n")
